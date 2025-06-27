@@ -33,7 +33,7 @@ class HallmarksOfCancerDataset(Dataset):
     - Multi-label encoding
     """
     
-    # Hallmark label mapping
+    # Hallmark label mapping (exact names from the dataset)
     HALLMARK_LABELS = {
         0: "evading_growth_suppressors",
         1: "tumor_promoting_inflammation",
@@ -75,7 +75,7 @@ class HallmarksOfCancerDataset(Dataset):
         
         # Load dataset
         logger.info(f"Loading HoC dataset split: {split}")
-        self.dataset = load_dataset("qasimshabbir/HoC", split=split)
+        self.dataset = load_dataset("qanastek/HoC", split=split)
         
         # Cache for knowledge graphs
         self.kg_cache = {} if cache_graphs else None
@@ -102,7 +102,7 @@ class HallmarksOfCancerDataset(Dataset):
         
         # Extract text and labels
         text = sample['text']
-        labels = self._encode_labels(sample['labels'])
+        labels = self._encode_labels(sample['label'])  # 'label' not 'labels' in HoC dataset
         
         # Tokenize text
         encoding = self.tokenizer(
@@ -118,8 +118,9 @@ class HallmarksOfCancerDataset(Dataset):
         if self.cache_graphs and idx in self.kg_cache:
             kg_output = self.kg_cache[idx]
         else:
-            # Extract hallmarks for this sample
-            hallmarks = [self.HALLMARK_LABELS[i] for i in range(11) if labels[i] == 1 and i != 7]
+            # Extract hallmarks for this sample (convert to lowercase with underscores for KG processing)
+            hallmarks = [self.HALLMARK_LABELS[i].lower().replace(' ', '_').replace('and_', '') 
+                        for i in range(11) if labels[i] == 1 and i != 7]
             
             # Process through KG pipeline
             kg_output = self.kg_pipeline.process_text(text, hallmarks)

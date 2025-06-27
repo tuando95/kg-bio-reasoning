@@ -39,7 +39,7 @@ class KnowledgeGraphPreprocessor:
     Pre-processes and caches knowledge graphs for the entire dataset.
     """
     
-    # Hallmark label mapping (same as in dataset.py)
+    # Hallmark label mapping (exact names from the dataset)
     HALLMARK_LABELS = {
         0: "evading_growth_suppressors",
         1: "tumor_promoting_inflammation",
@@ -103,7 +103,7 @@ class KnowledgeGraphPreprocessor:
         
         # Load dataset
         logger.info(f"Loading {split} dataset...")
-        dataset = load_dataset("qasimshabbir/HoC", split=split)
+        dataset = load_dataset("qanastek/HoC", split=split)
         
         # Check for existing cache
         cache_index_path = split_cache_dir / "index.json"
@@ -129,13 +129,13 @@ class KnowledgeGraphPreprocessor:
                 
                 # Extract text and labels
                 text = sample['text']
-                labels = sample['labels']
+                labels = sample['label']  # 'label' not 'labels' in HoC dataset
                 
-                # Get hallmarks for this sample
+                # Get hallmarks for this sample (convert to lowercase with underscores for KG processing)
                 hallmarks = [
-                    self.HALLMARK_LABELS[i] 
-                    for i in range(11) 
-                    if i in labels and i != 7  # Skip "none"
+                    self.HALLMARK_LABELS[i].lower().replace(' ', '_').replace('and_', '') 
+                    for i in labels 
+                    if i != 7  # Skip "none"
                 ]
                 
                 # Process through KG pipeline

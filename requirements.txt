@@ -9,7 +9,7 @@ scipy>=1.10.0
 
 # Biological NLP
 scispacy>=0.5.1
-en-core-sci-lg @ https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.1/en_core_sci_lg-0.5.1.tar.gz
+en-core-sci-lg @ https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.4/en_core_sci_lg-0.5.4.tar.gz
 
 # Graph Neural Networks
 torch-geometric>=2.3.0
