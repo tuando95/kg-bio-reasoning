@@ -38,10 +38,17 @@ class BioKGBioBERT(nn.Module):
         Initialize BioKG-BioBERT model.
         
         Args:
-            config: Complete configuration dictionary
+            config: Model configuration dictionary
         """
         super().__init__()
         self.config = config
+        
+        # Store loss weights for use in forward pass
+        self.loss_weights = config.get('loss_weights', {
+            'hallmark_loss': 1.0,
+            'pathway_loss': 0.0,
+            'consistency_loss': 0.0
+        })
         
         # Model components based on configuration
         self.use_kg = config.get('use_knowledge_graph', True)
@@ -271,7 +278,7 @@ class BioKGBioBERT(nn.Module):
         Returns:
             Total loss
         """
-        loss_weights = self.config['training']['loss_weights']
+        loss_weights = self.loss_weights
         
         # Hallmark classification loss (multi-label)
         hallmark_loss = F.binary_cross_entropy_with_logits(
