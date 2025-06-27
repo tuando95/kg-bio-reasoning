@@ -329,12 +329,12 @@ class BiologicalGraphEncoder(nn.Module):
         Returns:
             Dictionary with node and graph embeddings
         """
-        # Extract graph components
-        x = graph_data['node_features']
-        edge_index = graph_data['edge_index']
-        edge_attr = graph_data.get('edge_types')
-        node_types = graph_data.get('node_types')
-        batch = graph_data.get('batch')
+        # Extract graph components using PyTorch Geometric conventions
+        x = graph_data.x if hasattr(graph_data, 'x') else graph_data.get('node_features')
+        edge_index = graph_data.edge_index if hasattr(graph_data, 'edge_index') else graph_data.get('edge_index')
+        edge_attr = graph_data.edge_attr if hasattr(graph_data, 'edge_attr') else graph_data.get('edge_types')
+        node_types = graph_data.node_types if hasattr(graph_data, 'node_types') else graph_data.get('node_types')
+        batch = graph_data.batch if hasattr(graph_data, 'batch') else graph_data.get('batch')
         
         # Forward through GAT
         gat_output = self.gat(x, edge_index, edge_attr, node_types, batch)
