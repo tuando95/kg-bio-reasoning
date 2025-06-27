@@ -115,9 +115,9 @@ class Trainer:
         optimizer_config = self.config['training']['optimizer']
         self.optimizer = AdamW(
             self.model.parameters(),
-            lr=self.config['training']['learning_rate'],
-            weight_decay=optimizer_config['weight_decay'],
-            eps=optimizer_config['eps']
+            lr=float(self.config['training']['learning_rate']),
+            weight_decay=float(optimizer_config['weight_decay']),
+            eps=float(optimizer_config['eps'])
         )
         
         # Learning rate scheduler
