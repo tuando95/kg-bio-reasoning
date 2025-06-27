@@ -152,16 +152,20 @@ class BiologicalKGBuilder:
                        confidence=edge.confidence,
                        **edge.properties)
         
+        # Log edge status
+        logger.info(f"After API calls: {kg.number_of_edges()} edges")
+        
         # Add co-occurrence edges if no edges found
         if kg.number_of_edges() == 0 and len(entity_nodes) > 1:
             logger.warning("No edges from databases, adding co-occurrence edges")
             for i, node1 in enumerate(entity_nodes):
                 for node2 in entity_nodes[i+1:]:
-                    if node1.node_type in ['gene', 'protein'] and node2.node_type in ['gene', 'protein']:
-                        kg.add_edge(node1.node_id, node2.node_id,
-                                   edge_type='co_occurrence',
-                                   confidence=0.5,
-                                   source='text')
+                    # Add edges between any entities (not just genes/proteins)
+                    kg.add_edge(node1.node_id, node2.node_id,
+                               edge_type='co_occurrence',
+                               confidence=0.5,
+                               source='text')
+            logger.info(f"After co-occurrence: {kg.number_of_edges()} edges")
         
         # Add pathway nodes if requested
         if self.include_pathways:
@@ -345,24 +349,47 @@ class BiologicalKGBuilder:
         """Parse STRING API response"""
         edges = []
         
+        logger.debug(f"Parsing STRING response with {len(data)} items")
+        
         for interaction in data:
-            if 'stringId_A' in interaction and 'stringId_B' in interaction:
-                id_a = interaction['stringId_A'].split('.')[-1]
-                id_b = interaction['stringId_B'].split('.')[-1]
+            # STRING API returns preferredName_A and preferredName_B
+            protein_a = None
+            protein_b = None
+            
+            # Try different field names
+            if 'preferredName_A' in interaction and 'preferredName_B' in interaction:
+                protein_a = interaction['preferredName_A']
+                protein_b = interaction['preferredName_B']
+            elif 'stringId_A' in interaction and 'stringId_B' in interaction:
+                protein_a = interaction['stringId_A'].split('.')[-1]
+                protein_b = interaction['stringId_B'].split('.')[-1]
+            
+            if protein_a and protein_b:
+                # Find matching nodes
+                node_a = None
+                node_b = None
                 
-                if id_a in id_to_node and id_b in id_to_node:
+                for key, node in id_to_node.items():
+                    if protein_a.upper() in key.upper() or protein_a.upper() == node.name.upper():
+                        node_a = node
+                    if protein_b.upper() in key.upper() or protein_b.upper() == node.name.upper():
+                        node_b = node
+                
+                if node_a and node_b and node_a != node_b:
                     edge = KGEdge(
-                        source=id_to_node[id_a].node_id,
-                        target=id_to_node[id_b].node_id,
+                        source=node_a.node_id,
+                        target=node_b.node_id,
                         edge_type='interacts',
                         properties={
                             'score': interaction.get('score', 0),
-                            'sources': interaction.get('sources', [])
+                            'database': 'STRING'
                         },
                         confidence=interaction.get('score', 0) / 1000.0
                     )
                     edges.append(edge)
+                    logger.debug(f"Added edge: {node_a.name} -> {node_b.name}")
         
+        logger.info(f"Parsed {len(edges)} edges from STRING")
         return edges
     
     async def _fetch_kegg_pathways(self, nodes: List[KGNode]) -> List[KGEdge]:
