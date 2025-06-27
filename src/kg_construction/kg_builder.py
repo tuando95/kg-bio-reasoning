@@ -313,8 +313,9 @@ class BiologicalKGBuilder:
                 string_ids = []
                 for node in nodes:
                     if node.node_type in ['gene', 'protein']:
-                        # Use gene name as STRING identifier
-                        string_ids.append(f"9606.{node.name.upper()}")
+                        # Map node to both with and without species prefix
+                        string_ids.append(node.name.upper())
+                        id_to_node[node.name.upper()] = node
                         id_to_node[f"9606.{node.name.upper()}"] = node
                 
                 if not string_ids:
@@ -322,8 +323,10 @@ class BiologicalKGBuilder:
                     return edges
                 
                 url = "https://string-db.org/api/json/network"
+                # STRING expects gene names without species prefix for the identifiers parameter
+                gene_names = [node.name.upper() for node in nodes if node.node_type in ['gene', 'protein']]
                 params = {
-                    'identifiers': '%0d'.join(string_ids[:10]),  # Limit to 10 for API
+                    'identifiers': '%0d'.join(gene_names[:10]),  # Just gene names, limit to 10
                     'species': 9606,  # Human
                     'required_score': 400,  # Lower threshold
                     'network_type': 'functional',
