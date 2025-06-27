@@ -29,12 +29,19 @@ def run_simple_baseline():
     
     # Modify for baseline experiment (BioBERT only)
     config['experiment']['name'] = 'simple_baseline_test'
-    config['training']['batch_size'] = 8  # Smaller batch for testing
-    config['training']['max_epochs'] = 2  # Just 2 epochs for testing
+    config['training']['batch_size'] = 16  # Reasonable batch size
+    config['training']['max_epochs'] = 1  # Just 1 epoch for testing
     
-    # Disable knowledge graph for baseline
+    # Add some training settings
+    config['experiment']['log_interval'] = 50  # Log every 50 batches
+    
+    # Disable knowledge graph and bio attention for baseline
     config['model']['use_knowledge_graph'] = False
     config['model']['use_bio_attention'] = False
+    
+    # Also disable in training config
+    config['training']['loss_weights']['pathway_loss'] = 0.0
+    config['training']['loss_weights']['consistency_loss'] = 0.0
     
     # Simplified loss weights
     config['training']['loss_weights'] = {
@@ -123,9 +130,9 @@ def run_kg_enabled_experiment():
     config['training']['batch_size'] = 4  # Smaller batch due to KG overhead
     config['training']['max_epochs'] = 2
     
-    # Enable knowledge graph
+    # Enable knowledge graph but disable bio attention for now (it's slow)
     config['model']['use_knowledge_graph'] = True
-    config['model']['use_bio_attention'] = True
+    config['model']['use_bio_attention'] = False
     
     # Enable all loss components
     config['training']['loss_weights'] = {
