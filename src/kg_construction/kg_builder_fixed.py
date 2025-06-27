@@ -684,7 +684,7 @@ class BiologicalKGBuilder:
             return edges
         
         # Query Reactome ContentService API
-        cache_key = f"reactome_pathways_v3_{'-'.join(sorted(gene_names))}"
+        cache_key = f"reactome_pathways_v4_{'-'.join(sorted(gene_names))}"
         
         if cache_key in self.api_cache:
             all_pathways = self.api_cache[cache_key]
@@ -692,91 +692,89 @@ class BiologicalKGBuilder:
             all_pathways = {}
             try:
                 async with aiohttp.ClientSession() as session:
-                    # Search for each gene individually using the correct response structure
+                    # Search for each gene individually using the working approach
                     for gene_name in gene_names[:10]:  # Limit to avoid too many requests
-                        # Try both gene name and UniProt ID if available
-                        identifiers_to_try = [gene_name]
-                        if gene_name in self.REACTOME_IDENTIFIERS:
-                            identifiers_to_try.extend(self.REACTOME_IDENTIFIERS[gene_name][:1])  # Add UniProt ID
+                        # Search for the gene
+                        search_url = f"https://reactome.org/ContentService/search/query?query={gene_name}&species=Homo%20sapiens"
+                        logger.debug(f"Reactome search for {gene_name}")
                         
-                        entity_found = False
-                        
-                        for identifier in identifiers_to_try:
-                            if entity_found:
-                                break
+                        async with session.get(search_url, headers={'Accept': 'application/json'}) as search_response:
+                            if search_response.status == 200:
+                                search_data = await search_response.json()
                                 
-                            search_url = f"https://reactome.org/ContentService/search/query?query={identifier}&species=Homo%20sapiens"
-                            logger.debug(f"Reactome search for {identifier} (gene: {gene_name})")
-                            
-                            async with session.get(search_url, headers={'Accept': 'application/json'}) as search_response:
-                                if search_response.status == 200:
-                                    search_data = await search_response.json()
-                                    
-                                    # Look through results for protein entries
-                                    for result in search_data.get('results', []):
-                                        if result.get('typeName') == 'Protein' and 'entries' in result:
-                                            # Process entries within the Protein result
-                                            for entry in result['entries']:
-                                                if entity_found:
-                                                    break
+                                # Look through results for protein entries
+                                entity_found = False
+                                
+                                for result in search_data.get('results', []):
+                                    if entity_found:
+                                        break
+                                        
+                                    if result.get('typeName') == 'Protein' and 'entries' in result:
+                                        # Process entries within the Protein result
+                                        for entry in result['entries']:
+                                            if entity_found:
+                                                break
+                                                
+                                            # Check if this is a human protein
+                                            species_list = entry.get('species', [])
+                                            if isinstance(species_list, list) and any('Homo sapiens' in str(s) for s in species_list):
+                                                entity_id = entry.get('stId')
+                                                
+                                                if entity_id:
+                                                    # Get pathways for this entity
+                                                    pathways_url = f"https://reactome.org/ContentService/data/pathways/low/entity/{entity_id}?species=9606"
                                                     
-                                                # Check if this is a human protein
-                                                species_list = entry.get('species', [])
-                                                if any('Homo sapiens' in s for s in species_list):
-                                                    entity_id = entry.get('stId') or entry.get('id')
-                                                    
-                                                    if entity_id:
-                                                        # Get pathways for this entity
-                                                        pathways_url = f"https://reactome.org/ContentService/data/pathways/low/entity/{entity_id}?species=9606"
-                                                        
-                                                        async with session.get(pathways_url, headers={'Accept': 'application/json'}) as pathway_response:
-                                                            if pathway_response.status == 200:
-                                                                pathways = await pathway_response.json()
-                                                                logger.info(f"Reactome found {len(pathways)} pathways for {gene_name} (entity: {entity_id})")
-                                                                
-                                                                # Store pathways
-                                                                pathways_for_gene = []
-                                                                for pathway in pathways[:20]:  # Limit pathways
-                                                                    pathways_for_gene.append({
-                                                                        'stId': pathway.get('stId', ''),
-                                                                        'displayName': pathway.get('displayName', ''),
-                                                                        'dbId': pathway.get('dbId', '')
-                                                                    })
-                                                                
-                                                                if pathways_for_gene:
-                                                                    all_pathways[gene_name] = pathways_for_gene
-                                                                    entity_found = True
-                                                                    break
-                                                            else:
-                                                                logger.warning(f"Failed to get pathways for {entity_id}: status {pathway_response.status}")
-                        
-                        # Also look for pathways directly in search results
-                        if not entity_found:
-                            search_url = f"https://reactome.org/ContentService/search/query?query={gene_name}&species=Homo%20sapiens&types=Pathway"
-                            
-                            async with session.get(search_url, headers={'Accept': 'application/json'}) as search_response:
-                                if search_response.status == 200:
-                                    search_data = await search_response.json()
-                                    
+                                                    async with session.get(pathways_url, headers={'Accept': 'application/json'}) as pathway_response:
+                                                        if pathway_response.status == 200:
+                                                            pathways = await pathway_response.json()
+                                                            logger.info(f"Reactome found {len(pathways)} pathways for {gene_name} (entity: {entity_id})")
+                                                            
+                                                            # Store pathways
+                                                            pathways_for_gene = []
+                                                            for pathway in pathways[:20]:  # Limit pathways
+                                                                pathways_for_gene.append({
+                                                                    'stId': pathway.get('stId', ''),
+                                                                    'displayName': pathway.get('displayName', ''),
+                                                                    'dbId': pathway.get('dbId', '')
+                                                                })
+                                                            
+                                                            if pathways_for_gene:
+                                                                all_pathways[gene_name] = pathways_for_gene
+                                                                entity_found = True
+                                                                break
+                                                        else:
+                                                            logger.warning(f"Failed to get pathways for {entity_id}: status {pathway_response.status}")
+                                
+                                # If no protein found, try looking for the gene in pathway names
+                                if not entity_found:
                                     pathways_for_gene = []
+                                    
+                                    # Also check Pathway results
                                     for result in search_data.get('results', []):
                                         if result.get('typeName') == 'Pathway' and 'entries' in result:
-                                            # Look through pathway entries
-                                            for entry in result['entries'][:10]:  # Limit entries
-                                                # Check if pathway name contains the gene
+                                            for entry in result['entries'][:10]:
                                                 name = entry.get('name', '')
-                                                if gene_name in name or identifier in name:
+                                                # Remove HTML tags
+                                                import re
+                                                clean_name = re.sub('<[^<]+?>', '', name)
+                                                
+                                                # Check if gene name is in pathway name
+                                                if gene_name in clean_name:
                                                     species_list = entry.get('species', [])
-                                                    if any('Homo sapiens' in s for s in species_list) or not species_list:
-                                                        pathways_for_gene.append({
-                                                            'stId': entry.get('stId', '') or entry.get('id', ''),
-                                                            'displayName': name,
-                                                            'dbId': entry.get('dbId', '')
-                                                        })
+                                                    if not species_list or any('Homo sapiens' in str(s) for s in species_list):
+                                                        stId = entry.get('stId') or entry.get('id')
+                                                        if stId:
+                                                            pathways_for_gene.append({
+                                                                'stId': stId,
+                                                                'displayName': clean_name,
+                                                                'dbId': entry.get('dbId', '')
+                                                            })
                                     
                                     if pathways_for_gene:
-                                        all_pathways[gene_name] = pathways_for_gene
+                                        all_pathways[gene_name] = pathways_for_gene[:10]
                                         logger.debug(f"Found {len(pathways_for_gene)} pathways for {gene_name} via pathway search")
+                            else:
+                                logger.warning(f"Reactome search failed for {gene_name}: status {search_response.status}")
                         
                         # Brief delay between searches
                         await asyncio.sleep(0.1)
