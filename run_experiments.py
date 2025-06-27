@@ -52,6 +52,9 @@ class ExperimentRunner:
         with open(base_config_path, 'r') as f:
             self.base_config = yaml.safe_load(f)
         
+        # Turn off AMP globally
+        self.base_config['experiment']['mixed_precision'] = False
+        
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         

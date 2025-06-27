@@ -35,6 +35,9 @@ def run_simple_baseline():
     # Add some training settings
     config['experiment']['log_interval'] = 50  # Log every 50 batches
     
+    # Turn off AMP to avoid issues
+    config['experiment']['mixed_precision'] = False
+    
     # Disable knowledge graph and bio attention for baseline
     config['model']['use_knowledge_graph'] = False
     config['model']['use_bio_attention'] = False
@@ -130,9 +133,12 @@ def run_kg_enabled_experiment():
     config['training']['batch_size'] = 4  # Smaller batch due to KG overhead
     config['training']['max_epochs'] = 2
     
-    # Enable knowledge graph but disable bio attention for now (it's slow)
+    # Turn off AMP
+    config['experiment']['mixed_precision'] = False
+    
+    # Enable knowledge graph and bio attention
     config['model']['use_knowledge_graph'] = True
-    config['model']['use_bio_attention'] = False
+    config['model']['use_bio_attention'] = True
     
     # Enable all loss components
     config['training']['loss_weights'] = {
