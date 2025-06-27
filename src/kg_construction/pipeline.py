@@ -73,7 +73,7 @@ class BiologicalKGPipeline:
         
         logger.info("Pipeline initialization complete")
     
-    def process_text(self, text: str, 
+    async def process_text(self, text: str, 
                     hallmarks: Optional[List[str]] = None,
                     use_cache: bool = True) -> KGPipelineOutput:
         """
@@ -100,7 +100,7 @@ class BiologicalKGPipeline:
         
         # Build knowledge graph
         logger.debug("Building knowledge graph...")
-        kg = asyncio.run(self.kg_builder.build_knowledge_graph(entities, hallmarks))
+        kg = await self.kg_builder.build_knowledge_graph(entities, hallmarks)
         logger.info(f"Built knowledge graph with {kg.number_of_nodes()} nodes and {kg.number_of_edges()} edges")
         
         # Create output
@@ -116,9 +116,17 @@ class BiologicalKGPipeline:
         
         return output
     
-    def process_batch(self, texts: List[str],
-                     hallmarks_list: Optional[List[List[str]]] = None,
-                     use_cache: bool = True) -> List[KGPipelineOutput]:
+    def process_text_sync(self, text: str, 
+                         hallmarks: Optional[List[str]] = None,
+                         use_cache: bool = True) -> KGPipelineOutput:
+        """
+        Synchronous version of process_text for compatibility.
+        """
+        return asyncio.run(self.process_text(text, hallmarks, use_cache))
+    
+    async def process_batch(self, texts: List[str],
+                           hallmarks_list: Optional[List[List[str]]] = None,
+                           use_cache: bool = True) -> List[KGPipelineOutput]:
         """
         Process a batch of texts through the pipeline.
         
@@ -130,16 +138,25 @@ class BiologicalKGPipeline:
         Returns:
             List of KGPipelineOutput objects
         """
-        outputs = []
-        
         if hallmarks_list is None:
             hallmarks_list = [None] * len(texts)
         
+        # Process all texts concurrently
+        tasks = []
         for text, hallmarks in zip(texts, hallmarks_list):
-            output = self.process_text(text, hallmarks, use_cache)
-            outputs.append(output)
+            task = self.process_text(text, hallmarks, use_cache)
+            tasks.append(task)
         
+        outputs = await asyncio.gather(*tasks)
         return outputs
+    
+    def process_batch_sync(self, texts: List[str],
+                          hallmarks_list: Optional[List[List[str]]] = None,
+                          use_cache: bool = True) -> List[KGPipelineOutput]:
+        """
+        Synchronous version of process_batch for compatibility.
+        """
+        return asyncio.run(self.process_batch(texts, hallmarks_list, use_cache))
     
     def map_entities_to_tokens(self, entities: List[BioEntity], 
                              tokenized_text: Dict) -> Dict[int, List[int]]:
