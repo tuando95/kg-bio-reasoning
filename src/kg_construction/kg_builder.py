@@ -8,7 +8,7 @@ This module builds sentence-specific biological knowledge graphs by:
 """
 
 import logging
-from typing import List, Dict, Set, Tuple, Optional
+from typing import List, Dict, Set, Tuple, Optional, Any
 from dataclasses import dataclass
 import networkx as nx
 import requests
@@ -31,7 +31,8 @@ class KGNode:
     node_id: str
     node_type: str  # gene, protein, pathway, go_term, hallmark
     name: str
-    properties: Dict[str, any]
+    properties: Dict[str, Any]
+    original_text: Optional[str] = None  # Original text before normalization
     
     def __hash__(self):
         return hash(self.node_id)
@@ -46,7 +47,7 @@ class KGEdge:
     source: str
     target: str
     edge_type: str  # interacts, regulates, pathway_member, associated_with
-    properties: Dict[str, any]
+    properties: Dict[str, Any]
     confidence: float
 
 
