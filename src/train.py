@@ -209,13 +209,27 @@ class Trainer:
             # Move batch to device
             batch = self._move_batch_to_device(batch)
             
+            # Filter batch to only include model inputs
+            model_inputs = {
+                'input_ids': batch['input_ids'],
+                'attention_mask': batch['attention_mask'],
+                'labels': batch['labels']
+            }
+            
+            # Add optional inputs if present
+            optional_keys = ['graph_data', 'entity_mapping', 'entity_types', 
+                           'entity_confidences', 'biological_context', 'pathway_labels']
+            for key in optional_keys:
+                if key in batch:
+                    model_inputs[key] = batch[key]
+            
             # Forward pass with mixed precision
             if self.use_amp:
                 with torch.cuda.amp.autocast():
-                    outputs = self.model(**batch)
+                    outputs = self.model(**model_inputs)
                     loss = outputs['loss'] / self.gradient_accumulation_steps
             else:
-                outputs = self.model(**batch)
+                outputs = self.model(**model_inputs)
                 loss = outputs['loss'] / self.gradient_accumulation_steps
             
             # Backward pass
