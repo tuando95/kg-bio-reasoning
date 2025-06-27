@@ -1,16 +1,9 @@
 """
-Fixed Biological Knowledge Graph Construction Module
+Fixed Biological Knowledge Graph Construction Module v2
 
-This module builds sentence-specific biological knowledge graphs by:
-1. Querying biological databases (KEGG, STRING, Reactome)
-2. Constructing subgraphs with entity relationships
-3. Adding hallmark-specific pathway nodes
-
-Key fixes:
-- Corrected STRING API parameters and response parsing
-- Updated Reactome API to use new ContentService
-- Improved entity normalization and ID mapping
-- Added comprehensive error handling and logging
+Additional fixes:
+- STRING API now queries each protein individually or in correct batch format
+- Reactome API endpoint corrected
 """
 
 import logging
@@ -366,57 +359,123 @@ class BiologicalKGBuilder:
             logger.debug("No gene/protein nodes for STRING query")
             return edges
         
-        # Limit to 100 identifiers per query (STRING limit)
-        gene_names = gene_names[:100]
+        # STRING works better with newline-separated identifiers in POST requests
+        # or with the network endpoint using specific formatting
         
         # Check cache
-        cache_key = f"string_interactions_{'-'.join(sorted(gene_names))}"
+        cache_key = f"string_interactions_v2_{'-'.join(sorted(gene_names))}"
         if cache_key in self.api_cache:
             cached_data = self.api_cache[cache_key]
             return self._parse_string_response(cached_data, name_to_node)
         
-        # Query STRING API
+        # Query STRING API - use POST method for multiple proteins
         try:
             async with aiohttp.ClientSession() as session:
                 url = "https://string-db.org/api/tsv/network"
                 
-                # STRING expects space-separated identifiers
-                params = {
-                    'identifiers': ' '.join(gene_names),  # Space-separated, not URL-encoded
-                    'species': 9606,  # Human
-                    'required_score': self.string_confidence,
+                # Try POST method with form data
+                data = {
+                    'identifiers': '\r'.join(gene_names),  # Carriage return separated
+                    'species': '9606',  # Human
+                    'required_score': str(self.string_confidence),
                     'network_type': 'functional',
-                    'caller_identity': 'biokg_biobert_fixed'
+                    'caller_identity': 'biokg_biobert_v2'
                 }
                 
-                logger.info(f"STRING API call with {len(gene_names)} identifiers")
-                logger.debug(f"STRING identifiers: {params['identifiers'][:100]}...")
+                logger.info(f"STRING API POST call with {len(gene_names)} identifiers")
+                logger.debug(f"STRING identifiers: {gene_names}")
                 
-                async with session.get(url, params=params) as response:
+                async with session.post(url, data=data) as response:
                     if response.status == 200:
                         text = await response.text()
                         # Parse TSV response
                         lines = text.strip().split('\n')
                         if len(lines) > 1:  # Has header + data
-                            data = []
+                            data_list = []
                             headers = lines[0].split('\t')
                             for line in lines[1:]:
                                 values = line.split('\t')
                                 if len(values) == len(headers):
-                                    data.append(dict(zip(headers, values)))
+                                    data_list.append(dict(zip(headers, values)))
                             
-                            logger.info(f"STRING returned {len(data)} interactions")
-                            self.api_cache[cache_key] = data
-                            edges = self._parse_string_response(data, name_to_node)
+                            logger.info(f"STRING returned {len(data_list)} interactions")
+                            self.api_cache[cache_key] = data_list
+                            edges = self._parse_string_response(data_list, name_to_node)
                         else:
                             logger.warning("STRING returned no interactions")
                     else:
-                        error_text = await response.text()
-                        logger.error(f"STRING API returned status {response.status}: {error_text[:200]}")
+                        # If POST fails, try individual queries
+                        logger.warning(f"STRING POST failed with status {response.status}, trying individual queries")
+                        edges = await self._fetch_string_individual(gene_names, name_to_node)
                         
         except Exception as e:
             logger.error(f"Error fetching STRING interactions: {e}", exc_info=True)
+            # Fallback to individual queries
+            edges = await self._fetch_string_individual(gene_names, name_to_node)
         
+        return edges
+    
+    async def _fetch_string_individual(self, gene_names: List[str], name_to_node: Dict) -> List[KGEdge]:
+        """Fetch STRING interactions one protein at a time"""
+        all_interactions = {}
+        edges = []
+        
+        async with aiohttp.ClientSession() as session:
+            for gene_name in gene_names[:10]:  # Limit to 10 to avoid too many requests
+                try:
+                    url = "https://string-db.org/api/tsv/interaction_partners"
+                    params = {
+                        'identifiers': gene_name,
+                        'species': '9606',
+                        'required_score': str(self.string_confidence),
+                        'limit': '20'  # Limit partners per protein
+                    }
+                    
+                    logger.debug(f"STRING individual query for {gene_name}")
+                    
+                    async with session.get(url, params=params) as response:
+                        if response.status == 200:
+                            text = await response.text()
+                            lines = text.strip().split('\n')
+                            if len(lines) > 1:
+                                headers = lines[0].split('\t')
+                                for line in lines[1:]:
+                                    values = line.split('\t')
+                                    if len(values) == len(headers):
+                                        interaction = dict(zip(headers, values))
+                                        # Check if partner is in our node list
+                                        partner = interaction.get('preferredName_B', '')
+                                        if partner in name_to_node:
+                                            key = tuple(sorted([gene_name, partner]))
+                                            if key not in all_interactions:
+                                                all_interactions[key] = interaction
+                        
+                    await asyncio.sleep(0.1)  # Brief delay between requests
+                    
+                except Exception as e:
+                    logger.error(f"Error fetching STRING data for {gene_name}: {e}")
+        
+        # Convert to edges
+        for (gene1, gene2), interaction in all_interactions.items():
+            node1 = name_to_node.get(gene1)
+            node2 = name_to_node.get(gene2)
+            
+            if node1 and node2:
+                score = float(interaction.get('score', 0))
+                edge = KGEdge(
+                    source=node1.node_id,
+                    target=node2.node_id,
+                    edge_type='interacts',
+                    properties={
+                        'score': score,
+                        'database': 'STRING',
+                        'method': 'individual_query'
+                    },
+                    confidence=score / 1000.0
+                )
+                edges.append(edge)
+        
+        logger.info(f"STRING individual queries found {len(edges)} interactions")
         return edges
     
     def _parse_string_response(self, data: List[Dict], name_to_node: Dict) -> List[KGEdge]:
@@ -600,7 +659,7 @@ class BiologicalKGBuilder:
             return edges
         
         # Query Reactome ContentService API
-        cache_key = f"reactome_pathways_{'-'.join(sorted(gene_names))}"
+        cache_key = f"reactome_pathways_v2_{'-'.join(sorted(gene_names))}"
         
         if cache_key in self.api_cache:
             all_pathways = self.api_cache[cache_key]
@@ -608,8 +667,8 @@ class BiologicalKGBuilder:
             all_pathways = {}
             try:
                 async with aiohttp.ClientSession() as session:
-                    # Use the mapping endpoint to get Reactome entities
-                    url = "https://reactome.org/ContentService/data/mapping"
+                    # Use the identifier mapping endpoint
+                    url = "https://reactome.org/ContentService/data/identifiers/projection"
                     headers = {
                         'Content-Type': 'text/plain',
                         'Accept': 'application/json'
@@ -620,27 +679,36 @@ class BiologicalKGBuilder:
                     
                     async with session.post(url, data=data, headers=headers) as response:
                         if response.status == 200:
-                            mapping_data = await response.json()
+                            projection_data = await response.json()
                             
-                            # For each mapped entity, get its pathways
-                            for entity in mapping_data:
-                                gene_name = entity.get('identifier')
-                                reactome_id = entity.get('stId')
-                                
-                                if gene_name and reactome_id:
-                                    # Get pathways for this entity
-                                    pathway_url = f"https://reactome.org/ContentService/data/pathways/low/entity/{reactome_id}/9606"
-                                    
-                                    async with session.get(pathway_url, headers={'Accept': 'application/json'}) as pathway_response:
-                                        if pathway_response.status == 200:
-                                            pathways = await pathway_response.json()
-                                            all_pathways[gene_name] = pathways
-                                            logger.debug(f"Reactome found {len(pathways)} pathways for {gene_name}")
-                                        else:
-                                            logger.warning(f"Reactome pathway API returned status {pathway_response.status} for {reactome_id}")
+                            # Process each projection result
+                            for result in projection_data:
+                                identifier = result.get('identifier')
+                                if identifier and identifier in name_to_node:
+                                    pathways_data = result.get('pathways', [])
+                                    all_pathways[identifier] = pathways_data
+                                    logger.debug(f"Reactome found {len(pathways_data)} pathways for {identifier}")
                         else:
-                            error_text = await response.text()
-                            logger.error(f"Reactome mapping API returned status {response.status}: {error_text[:200]}")
+                            # Try alternative endpoint
+                            logger.warning(f"Reactome projection API returned {response.status}, trying query endpoint")
+                            
+                            # Try individual queries
+                            for gene_name in gene_names[:5]:  # Limit to avoid too many requests
+                                query_url = f"https://reactome.org/ContentService/search/query?query={gene_name}&species=Homo%20sapiens&types=Pathway"
+                                
+                                async with session.get(query_url, headers={'Accept': 'application/json'}) as query_response:
+                                    if query_response.status == 200:
+                                        search_results = await query_response.json()
+                                        if 'results' in search_results:
+                                            pathways = []
+                                            for result in search_results['results'][:10]:  # Limit pathways
+                                                if result.get('typeName') == 'Pathway':
+                                                    pathways.append({
+                                                        'stId': result.get('stId', ''),
+                                                        'displayName': result.get('name', '')
+                                                    })
+                                            if pathways:
+                                                all_pathways[gene_name] = pathways
                             
                 self.api_cache[cache_key] = all_pathways
                 
@@ -667,7 +735,7 @@ class BiologicalKGBuilder:
                             properties={
                                 'database': 'Reactome',
                                 'pathway_id': pathway_id,
-                                'species': pathway.get('species', {}).get('displayName', 'Homo sapiens')
+                                'species': 'Homo sapiens'
                             }
                         )
                         self.pending_edges.append(pathway_node)
