@@ -5,7 +5,7 @@ Test the improved entity extractor with HoC dataset samples
 import asyncio
 import logging
 from src.kg_construction.bio_entity_extractor_improved import BioEntityExtractor
-from src.kg_construction.kg_builder_fixed import BiologicalKGBuilder
+from src.kg_construction.kg_builder import BiologicalKGBuilder
 from datasets import load_dataset
 import yaml
 
