@@ -80,7 +80,11 @@ def run_simple_baseline():
             outputs = model(
                 input_ids=batch_device['input_ids'],
                 attention_mask=batch_device['attention_mask'],
-                knowledge_graphs=batch_device.get('knowledge_graphs'),
+                graph_data=batch_device.get('graph_data'),
+                entity_mapping=batch_device.get('entity_mapping'),
+                entity_types=batch_device.get('entity_types'),
+                entity_confidences=batch_device.get('entity_confidences'),
+                biological_context=batch_device.get('biological_context'),
                 labels=batch_device['labels']
             )
             
