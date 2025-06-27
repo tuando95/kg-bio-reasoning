@@ -4,7 +4,7 @@ Debug KG pipeline to see what entities are being extracted
 
 import asyncio
 import logging
-from src.kg_construction.pipeline import KGPipeline
+from src.kg_construction.pipeline import BiologicalKGPipeline
 import yaml
 
 # Set up detailed logging
@@ -21,7 +21,7 @@ async def debug_pipeline():
         config = yaml.safe_load(f)
     
     # Create pipeline
-    pipeline = KGPipeline(config['knowledge_graph'])
+    pipeline = BiologicalKGPipeline(config['knowledge_graph'])
     
     # Test texts with known genes
     test_texts = [
