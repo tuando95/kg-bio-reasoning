@@ -1,0 +1,227 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+venv/
+ENV/
+env/
+.venv
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+*.ipynb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Project-specific
+# Cache directories
+cache/
+*.cache
+.cache/
+kg_cache/
+api_cache.pkl
+
+# Experiment outputs
+experiments/
+results/
+checkpoints/
+logs/
+*.log
+
+# Tensorboard
+runs/
+tensorboard/
+
+# Model weights and checkpoints
+*.pt
+*.pth
+*.bin
+*.ckpt
+best_model/
+saved_models/
+
+# Data
+data/
+*.csv
+*.json
+*.pkl
+*.pickle
+
+# Large files
+*.tar.gz
+*.zip
+*.h5
+*.hdf5
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Configuration overrides (keep default)
+configs/*
+!configs/default_config.yaml
+
+# Credentials and secrets
+.env
+.env.*
+*.key
+*.pem
+credentials/
+secrets/
+
+# System files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Documentation builds
+docs/_build/
+docs/_static/
+docs/_templates/
+
+# Test coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Profiling
+*.prof
+*.lprof
+
+# Debugging
+.pdb_history
+
+# Package management
+pip-log.txt
+pip-delete-this-directory.txt
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Sphinx documentation
+docs/_build/
+
+# pyenv
+.python-version
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# Custom additions for BioKG-BioBERT
+# Preprocessed KG cache (large files)
+cache/kg_preprocessed/
+
+# Experiment tracking
+wandb/
+mlruns/
+
+# Slurm job outputs
+slurm-*.out
+job-*.err
+
+# Backup files
+*.bak
+*.backup
+
+# Lock files (keep requirements.txt)
+poetry.lock
+Pipfile.lock
+.idea/
+CLAUDE.md

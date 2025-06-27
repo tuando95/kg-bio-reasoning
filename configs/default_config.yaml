@@ -1,0 +1,235 @@
+# BioKG-BioBERT Configuration File
+
+# Model Configuration
+model:
+  base_model: "dmis-lab/biobert-base-cased-v1.1"
+  hidden_size: 768
+  num_labels: 11  # 10 hallmarks + "None"
+  dropout_rate: 0.1
+  
+  # Biological Attention Configuration
+  bio_attention:
+    num_heads: 8
+    fusion_strategy: "learned"  # Options: learned, fixed, adaptive
+    fusion_weight: 0.5  # Initial lambda value
+    pathway_relevance_dim: 256
+    
+  # Graph Neural Network Configuration
+  gnn:
+    type: "GAT"  # Graph Attention Network
+    num_layers: 3
+    hidden_dim: 512
+    num_heads: 4
+    dropout: 0.1
+    residual: true
+    
+  # Multi-Modal Fusion
+  fusion:
+    strategy: "late"  # Options: early, late, cross_modal
+    text_dim: 768
+    graph_dim: 512
+    fusion_dim: 1024
+
+# Knowledge Graph Configuration
+knowledge_graph:
+  # Biological Databases
+  databases:
+    - name: "KEGG"
+      enabled: true
+      api_endpoint: "https://rest.kegg.jp"
+    - name: "STRING"
+      enabled: true
+      api_endpoint: "https://string-db.org/api"
+      confidence_threshold: 700
+    - name: "Reactome"
+      enabled: true
+      api_endpoint: "https://reactome.org/ContentService"
+    - name: "GO"
+      enabled: true
+      
+  # Entity Extraction
+  entity_extraction:
+    model: "en_core_sci_lg"
+    entity_types: ["GENE", "PROTEIN", "CHEMICAL", "DISEASE"]
+    confidence_threshold: 0.85
+    
+  # Graph Construction
+  graph_construction:
+    max_hops: 2
+    max_neighbors: 50
+    include_pathways: true
+    include_go_terms: true
+    edge_types: ["interacts", "regulates", "pathway_member", "associated_with"]
+
+# Training Configuration
+training:
+  batch_size: 16
+  max_epochs: 50
+  learning_rate: 2e-5
+  warmup_steps: 500
+  gradient_accumulation_steps: 2
+  max_grad_norm: 1.0
+  
+  # Optimizer
+  optimizer:
+    type: "AdamW"
+    weight_decay: 0.01
+    eps: 1e-8
+    
+  # Scheduler
+  scheduler:
+    type: "linear_warmup_cosine"
+    num_warmup_steps: 500
+    num_training_steps: 10000
+    
+  # Multi-Task Loss Weights
+  loss_weights:
+    hallmark_loss: 1.0
+    pathway_loss: 0.25  # alpha
+    consistency_loss: 0.1  # beta
+    
+  # Early Stopping
+  early_stopping:
+    patience: 5
+    min_delta: 0.001
+    metric: "val_f1_macro"
+
+# Dataset Configuration
+dataset:
+  name: "qnashtek/HoC"
+  train_split: "train"
+  val_split: "validation"
+  test_split: "test"
+  max_seq_length: 512
+  
+  # Data Augmentation
+  augmentation:
+    enabled: true
+    synonym_replacement: true
+    pathway_paraphrasing: true
+    contrastive_sampling: true
+
+# Evaluation Configuration
+evaluation:
+  metrics:
+    - "micro_f1"
+    - "macro_f1"
+    - "weighted_f1"
+    - "hamming_loss"
+    - "exact_match_ratio"
+    - "per_hallmark_metrics"
+    - "auc_roc"
+    
+  # Biological Consistency Metrics
+  biological_metrics:
+    pathway_prediction_accuracy: true
+    literature_alignment: true
+    mechanism_plausibility: true
+    
+  # Statistical Testing
+  statistical_tests:
+    mcnemar_test: true
+    paired_t_test: true
+    wilcoxon_test: true
+    num_bootstrap_samples: 1000
+
+# Ablation Studies Configuration
+ablation_studies:
+  # A1: Attention Mechanism Variants
+  attention_variants:
+    - name: "full_biokg"
+      bio_attention: true
+      pathway_attention: true
+    - name: "no_bio_attention"
+      bio_attention: false
+      pathway_attention: false
+    - name: "entity_only"
+      bio_attention: true
+      pathway_attention: false
+    - name: "pathway_only"
+      bio_attention: false
+      pathway_attention: true
+      
+  # A2: Knowledge Graph Integration Levels
+  kg_integration_levels:
+    - name: "no_kg"
+      use_kg: false
+    - name: "entity_only"
+      use_kg: true
+      max_hops: 0
+    - name: "1_hop"
+      use_kg: true
+      max_hops: 1
+    - name: "2_hop"
+      use_kg: true
+      max_hops: 2
+      
+  # A3: Fusion Strategy Variants
+  fusion_strategies:
+    - "early"
+    - "late"
+    - "cross_modal"
+    - "no_fusion"
+    
+  # A4: Multi-Task Learning Components
+  multitask_variants:
+    - name: "hallmarks_only"
+      hallmark_loss: true
+      pathway_loss: false
+      consistency_loss: false
+    - name: "with_pathway"
+      hallmark_loss: true
+      pathway_loss: true
+      consistency_loss: false
+    - name: "with_consistency"
+      hallmark_loss: true
+      pathway_loss: false
+      consistency_loss: true
+    - name: "full_multitask"
+      hallmark_loss: true
+      pathway_loss: true
+      consistency_loss: true
+
+# Hyperparameter Search
+hyperparameter_search:
+  enabled: false
+  method: "grid"  # Options: grid, random, bayesian
+  
+  # Search Space
+  search_space:
+    fusion_weight: [0.1, 0.3, 0.5, 0.7, 0.9]
+    pathway_loss_weight: [0.1, 0.25, 0.5, 1.0]
+    consistency_loss_weight: [0.05, 0.1, 0.2, 0.5]
+    gnn_layers: [1, 2, 3, 4]
+    gnn_heads: [4, 8, 12, 16]
+    graph_embedding_dim: [256, 512, 768]
+
+# Experiment Settings
+experiment:
+  name: "biokg_biobert_hoc"
+  seed: 42
+  num_runs: 5  # For statistical significance
+  save_checkpoints: true
+  checkpoint_dir: "checkpoints"
+  log_dir: "logs"
+  results_dir: "results"
+  
+  # Hardware
+  device: "cuda"
+  num_gpus: 1
+  mixed_precision: true
+  
+  # Reproducibility
+  deterministic: true
+  benchmark: false
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  log_to_file: true
+  log_file: "experiment.log"
+  tensorboard: true
+  wandb:
+    enabled: false
+    project: "biokg-biobert"
+    entity: "your-entity"
