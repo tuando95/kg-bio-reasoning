@@ -643,7 +643,7 @@ class BiologicalKGBuilder:
         return pathways
     
     async def _fetch_reactome_pathways(self, nodes: List[KGNode]) -> List[KGEdge]:
-        """Fetch pathway information from Reactome using new ContentService API"""
+        """Fetch pathway information from Reactome using ContentService API"""
         edges = []
         
         # Collect gene names
@@ -659,7 +659,7 @@ class BiologicalKGBuilder:
             return edges
         
         # Query Reactome ContentService API
-        cache_key = f"reactome_pathways_v2_{'-'.join(sorted(gene_names))}"
+        cache_key = f"reactome_pathways_v3_{'-'.join(sorted(gene_names))}"
         
         if cache_key in self.api_cache:
             all_pathways = self.api_cache[cache_key]
@@ -667,48 +667,54 @@ class BiologicalKGBuilder:
             all_pathways = {}
             try:
                 async with aiohttp.ClientSession() as session:
-                    # Use the identifier mapping endpoint
-                    url = "https://reactome.org/ContentService/data/identifiers/projection"
-                    headers = {
-                        'Content-Type': 'text/plain',
-                        'Accept': 'application/json'
-                    }
-                    data = '\n'.join(gene_names)
-                    
-                    logger.debug(f"Reactome API call with {len(gene_names)} identifiers")
-                    
-                    async with session.post(url, data=data, headers=headers) as response:
-                        if response.status == 200:
-                            projection_data = await response.json()
-                            
-                            # Process each projection result
-                            for result in projection_data:
-                                identifier = result.get('identifier')
-                                if identifier and identifier in name_to_node:
-                                    pathways_data = result.get('pathways', [])
-                                    all_pathways[identifier] = pathways_data
-                                    logger.debug(f"Reactome found {len(pathways_data)} pathways for {identifier}")
-                        else:
-                            # Try alternative endpoint
-                            logger.warning(f"Reactome projection API returned {response.status}, trying query endpoint")
-                            
-                            # Try individual queries
-                            for gene_name in gene_names[:5]:  # Limit to avoid too many requests
-                                query_url = f"https://reactome.org/ContentService/search/query?query={gene_name}&species=Homo%20sapiens&types=Pathway"
+                    # Search for each gene individually to get Reactome entities
+                    for gene_name in gene_names[:10]:  # Limit to avoid too many requests
+                        # Step 1: Search for the gene/protein
+                        search_url = f"https://reactome.org/ContentService/search/query?query={gene_name}&species=Homo%20sapiens"
+                        
+                        logger.debug(f"Reactome search for {gene_name}")
+                        
+                        async with session.get(search_url, headers={'Accept': 'application/json'}) as search_response:
+                            if search_response.status == 200:
+                                search_data = await search_response.json()
                                 
-                                async with session.get(query_url, headers={'Accept': 'application/json'}) as query_response:
-                                    if query_response.status == 200:
-                                        search_results = await query_response.json()
-                                        if 'results' in search_results:
-                                            pathways = []
-                                            for result in search_results['results'][:10]:  # Limit pathways
-                                                if result.get('typeName') == 'Pathway':
-                                                    pathways.append({
-                                                        'stId': result.get('stId', ''),
-                                                        'displayName': result.get('name', '')
+                                # Find protein/gene entities from search results
+                                entity_ids = []
+                                for result in search_data.get('results', []):
+                                    if result.get('typeName') in ['Protein', 'Gene', 'EntityWithAccessionedSequence', 'ReferenceGeneProduct']:
+                                        if 'stId' in result:
+                                            entity_ids.append(result['stId'])
+                                        elif 'dbId' in result:
+                                            entity_ids.append(str(result['dbId']))
+                                
+                                # Step 2: Get pathways for each entity
+                                pathways_for_gene = []
+                                for entity_id in entity_ids[:3]:  # Limit entities per gene
+                                    pathways_url = f"https://reactome.org/ContentService/data/pathways/low/entity/{entity_id}?species=9606"
+                                    
+                                    async with session.get(pathways_url, headers={'Accept': 'application/json'}) as pathway_response:
+                                        if pathway_response.status == 200:
+                                            pathways = await pathway_response.json()
+                                            logger.debug(f"Reactome found {len(pathways)} pathways for {gene_name} (entity: {entity_id})")
+                                            
+                                            # Add unique pathways
+                                            seen_ids = set()
+                                            for pathway in pathways:
+                                                if pathway.get('stId') not in seen_ids:
+                                                    seen_ids.add(pathway.get('stId'))
+                                                    pathways_for_gene.append({
+                                                        'stId': pathway.get('stId', ''),
+                                                        'displayName': pathway.get('displayName', ''),
+                                                        'dbId': pathway.get('dbId', '')
                                                     })
-                                            if pathways:
-                                                all_pathways[gene_name] = pathways
+                                
+                                if pathways_for_gene:
+                                    all_pathways[gene_name] = pathways_for_gene[:20]  # Limit pathways per gene
+                            else:
+                                logger.warning(f"Reactome search failed for {gene_name}: status {search_response.status}")
+                        
+                        # Brief delay between searches
+                        await asyncio.sleep(0.1)
                             
                 self.api_cache[cache_key] = all_pathways
                 
