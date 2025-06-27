@@ -32,6 +32,9 @@ model:
 
 # Knowledge Graph Configuration
 knowledge_graph:
+  # Use simplified KG builder (for testing/development)
+  use_simple_kg_builder: false  # Set to true for mock graphs without API calls
+  
   # Biological Databases
   databases:
     - name: "KEGG"
@@ -40,7 +43,7 @@ knowledge_graph:
     - name: "STRING"
       enabled: true
       api_endpoint: "https://string-db.org/api"
-      confidence_threshold: 700
+      confidence_threshold: 400  # Lowered for more interactions
     - name: "Reactome"
       enabled: true
       api_endpoint: "https://reactome.org/ContentService"
@@ -51,7 +54,7 @@ knowledge_graph:
   entity_extraction:
     model: "en_core_sci_lg"
     entity_types: ["GENE", "PROTEIN", "CHEMICAL", "DISEASE"]
-    confidence_threshold: 0.85
+    confidence_threshold: 0.3  # Lowered for better recall
     
   # Graph Construction
   graph_construction:

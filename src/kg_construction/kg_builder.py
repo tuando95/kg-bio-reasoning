@@ -92,6 +92,9 @@ class BiologicalKGBuilder:
         os.makedirs(self.cache_dir, exist_ok=True)
         self.api_cache = self._load_cache()
         
+        # Pending edges to add after nodes are created
+        self.pending_edges = []
+        
     def _init_database_clients(self):
         """Initialize API clients for biological databases"""
         self.db_configs = {}
@@ -148,11 +151,30 @@ class BiologicalKGBuilder:
                        confidence=edge.confidence,
                        **edge.properties)
         
+        # Add co-occurrence edges if no edges found
+        if kg.number_of_edges() == 0 and len(entity_nodes) > 1:
+            logger.warning("No edges from databases, adding co-occurrence edges")
+            for i, node1 in enumerate(entity_nodes):
+                for node2 in entity_nodes[i+1:]:
+                    if node1.node_type in ['gene', 'protein'] and node2.node_type in ['gene', 'protein']:
+                        kg.add_edge(node1.node_id, node2.node_id,
+                                   edge_type='co_occurrence',
+                                   confidence=0.5,
+                                   source='text')
+        
         # Add pathway nodes if requested
         if self.include_pathways:
             pathway_nodes = await self._fetch_pathway_nodes(entity_nodes)
             for node in pathway_nodes:
                 kg.add_node(node.node_id, **node.__dict__)
+            
+            # Add pending edges (e.g., gene-pathway edges)
+            for edge in self.pending_edges:
+                kg.add_edge(edge.source, edge.target,
+                           edge_type=edge.edge_type,
+                           confidence=edge.confidence,
+                           **edge.properties)
+            self.pending_edges = []  # Clear pending edges
         
         # Add hallmark-specific pathways
         if hallmarks:
@@ -191,10 +213,18 @@ class BiologicalKGBuilder:
                 # Use entity text as fallback
                 node_id = f"ENTITY:{entity.text}"
             
+            # Normalize gene/protein names for API calls
+            normalized_name = entity.text.upper()
+            if entity.entity_type in ['GENE', 'PROTEIN']:
+                # Handle common variations
+                if normalized_name.startswith('P') and len(normalized_name) > 1 and normalized_name[1:].isdigit():
+                    normalized_name = 'TP' + normalized_name[1:]  # p53 -> TP53
+            
             node = KGNode(
                 node_id=node_id,
                 node_type=entity.entity_type.lower(),
-                name=entity.text,
+                name=normalized_name,
+                original_text=entity.text,
                 properties={
                     'normalized_ids': entity.normalized_ids,
                     'confidence': entity.confidence,
@@ -274,19 +304,36 @@ class BiologicalKGBuilder:
         # Query STRING API
         try:
             async with aiohttp.ClientSession() as session:
-                url = f"{self.db_configs['STRING']['api_endpoint']}/json/network"
+                # STRING expects protein names or identifiers
+                string_ids = []
+                for node in nodes:
+                    if node.node_type in ['gene', 'protein']:
+                        # Use gene name as STRING identifier
+                        string_ids.append(f"9606.{node.name.upper()}")
+                        id_to_node[f"9606.{node.name.upper()}"] = node
+                
+                if not string_ids:
+                    logger.warning("No valid STRING identifiers found")
+                    return edges
+                
+                url = "https://string-db.org/api/json/network"
                 params = {
-                    'identifiers': '%0d'.join(protein_ids),
+                    'identifiers': '%0d'.join(string_ids[:10]),  # Limit to 10 for API
                     'species': 9606,  # Human
-                    'required_score': self.string_confidence,
-                    'network_type': 'functional'
+                    'required_score': 400,  # Lower threshold
+                    'network_type': 'functional',
+                    'caller_identity': 'biokg_biobert'
                 }
                 
+                logger.debug(f"STRING API call with {len(string_ids)} identifiers")
                 async with session.get(url, params=params) as response:
                     if response.status == 200:
                         data = await response.json()
+                        logger.info(f"STRING returned {len(data)} interactions")
                         self.api_cache[cache_key] = data
                         edges = self._parse_string_response(data, id_to_node)
+                    else:
+                        logger.error(f"STRING API returned status {response.status}")
                         
         except Exception as e:
             logger.error(f"Error fetching STRING interactions: {e}")
@@ -459,8 +506,25 @@ class BiologicalKGBuilder:
         # Add KEGG pathway nodes
         for node in entity_nodes:
             if node.node_type == 'gene':
-                # Add some common cancer pathways
-                pathway_ids.update(['hsa04115', 'hsa04010', 'hsa04210'])  # p53, MAPK, Apoptosis
+                # Add common cancer pathways based on gene names
+                gene_pathway_map = {
+                    'TP53': ['hsa04115'],  # p53 signaling
+                    'P53': ['hsa04115'],
+                    'EGFR': ['hsa04010', 'hsa04012'],  # MAPK, ErbB signaling
+                    'VEGF': ['hsa04370'],  # VEGF signaling
+                    'VEGFA': ['hsa04370'],
+                    'BRCA1': ['hsa04110', 'hsa04115'],  # Cell cycle, p53
+                    'BRCA2': ['hsa04110', 'hsa04115'],
+                    'KRAS': ['hsa04010'],  # MAPK
+                    'PIK3CA': ['hsa04151'],  # PI3K-Akt
+                    'AKT1': ['hsa04151'],
+                    'MYC': ['hsa04110'],  # Cell cycle
+                    'PTEN': ['hsa04151']  # PI3K-Akt
+                }
+                
+                gene_name = node.name.upper()
+                if gene_name in gene_pathway_map:
+                    pathway_ids.update(gene_pathway_map[gene_name])
         
         # Create pathway nodes
         for pathway_id in pathway_ids:
@@ -473,6 +537,19 @@ class BiologicalKGBuilder:
                     properties={'database': 'KEGG', 'pathway_id': pathway_id}
                 )
                 pathway_nodes.append(node)
+                
+                # Add edges from genes to pathways
+                for entity_node in entity_nodes:
+                    if entity_node.node_type == 'gene' and entity_node.name.upper() in gene_pathway_map:
+                        if pathway_id in gene_pathway_map[entity_node.name.upper()]:
+                            edge = KGEdge(
+                                source=entity_node.node_id,
+                                target=f"KEGG:{pathway_id}",
+                                edge_type='pathway_member',
+                                properties={'database': 'KEGG'},
+                                confidence=0.8
+                            )
+                            self.pending_edges.append(edge)
         
         return pathway_nodes
     

@@ -16,6 +16,7 @@ import asyncio
 
 from .bio_entity_extractor import BioEntityExtractor, BioEntity
 from .kg_builder import BiologicalKGBuilder, KGNode, KGEdge
+from .simple_kg_builder import SimpleKGBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +60,13 @@ class BiologicalKGPipeline:
         )
         
         # Knowledge graph builder
-        self.kg_builder = BiologicalKGBuilder(
-            config
-        )
+        use_simple_builder = config.get('use_simple_kg_builder', True)  # Default to simple for now
+        if use_simple_builder:
+            logger.info("Using simplified KG builder for testing")
+            self.kg_builder = SimpleKGBuilder(config)
+        else:
+            logger.info("Using full biological KG builder with API calls")
+            self.kg_builder = BiologicalKGBuilder(config)
         
         # Cache for processed examples
         self.cache = {}

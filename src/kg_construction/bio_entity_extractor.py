@@ -50,7 +50,7 @@ class BioEntityExtractor:
         self.config = config
         self.entity_types = set(config.get('entity_types', 
                                           ['GENE', 'PROTEIN', 'CHEMICAL', 'DISEASE']))
-        self.confidence_threshold = config.get('confidence_threshold', 0.85)
+        self.confidence_threshold = config.get('confidence_threshold', 0.3)  # Lower threshold for more entities
         
         # Load ScispaCy model
         logger.info("Loading ScispaCy model...")
@@ -59,9 +59,14 @@ class BioEntityExtractor:
         # Add abbreviation detector
         self.nlp.add_pipe("abbreviation_detector")
         
-        # Add entity linker for UMLS
-        self.nlp.add_pipe("scispacy_linker", config={"resolve_abbreviations": True, 
-                                                     "linker_name": "umls"})
+        # Add entity linker for UMLS (optional - may fail if KB not downloaded)
+        try:
+            self.nlp.add_pipe("scispacy_linker", config={"resolve_abbreviations": True, 
+                                                         "linker_name": "umls"})
+            logger.info("UMLS entity linker added successfully")
+        except Exception as e:
+            logger.warning(f"Could not add UMLS entity linker: {e}")
+            logger.warning("Continuing without UMLS normalization")
         
         # Initialize database mappers
         self._init_database_mappers()
@@ -136,7 +141,16 @@ class BioEntityExtractor:
             'CELL_TYPE': 'CELL_TYPE',
             'CELL_LINE': 'CELL_LINE',
             'DNA': 'GENE',
-            'RNA': 'GENE'
+            'RNA': 'GENE',
+            'AMINO_ACID': 'CHEMICAL',
+            'SIMPLE_CHEMICAL': 'CHEMICAL',
+            'CELL': 'CELL_TYPE',
+            'TISSUE': 'TISSUE',
+            'ORGAN': 'ORGAN',
+            'ORGANISM': 'ORGANISM',
+            'BIOLOGICAL_PROCESS': 'PROCESS',
+            'MOLECULAR_FUNCTION': 'FUNCTION',
+            'PATHOLOGICAL_FORMATION': 'DISEASE'
         }
         
         mapped_type = label_mapping.get(ent.label_, ent.label_)
