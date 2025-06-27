@@ -334,7 +334,7 @@ class BiologicalKGBuilder:
                 }
                 
                 logger.debug(f"STRING API call with {len(gene_names)} identifiers")
-                async with session.get(url, params=params) as response:
+                async with session.get(url, params=params, headers={'Accept': 'application/json'}) as response:
                     if response.status == 200:
                         # STRING returns text/json, not application/json, so we need to parse manually
                         text = await response.text()
