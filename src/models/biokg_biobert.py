@@ -241,11 +241,11 @@ class BioKGBioBERT(nn.Module):
             output['graph_embedding'] = graph_embedding
         
         # Auxiliary predictions
-        if hasattr(self, 'pathway_classifier'):
+        if hasattr(self, 'pathway_classifier') and self.pathway_classifier is not None:
             pathway_logits = self.pathway_classifier(fused_representation)
             output['pathway_logits'] = pathway_logits
         
-        if hasattr(self, 'consistency_predictor'):
+        if hasattr(self, 'consistency_predictor') and self.consistency_predictor is not None:
             consistency_score = self.consistency_predictor(fused_representation)
             output['consistency_score'] = consistency_score
         
