@@ -150,10 +150,16 @@ class BioEntityExtractor:
             'ORGANISM': 'ORGANISM',
             'BIOLOGICAL_PROCESS': 'PROCESS',
             'MOLECULAR_FUNCTION': 'FUNCTION',
-            'PATHOLOGICAL_FORMATION': 'DISEASE'
+            'PATHOLOGICAL_FORMATION': 'DISEASE',
+            'ENTITY': 'GENE'  # Default mapping for generic entities
         }
         
         mapped_type = label_mapping.get(ent.label_, ent.label_)
+        
+        # For generic ENTITY labels, try to infer type from text
+        if ent.label_ == 'ENTITY' and mapped_type not in self.entity_types:
+            mapped_type = self._infer_entity_type(ent.text)
+        
         return mapped_type in self.entity_types
     
     def _process_entity(self, ent: Span, full_text: str) -> Optional[BioEntity]:
@@ -165,9 +171,14 @@ class BioEntityExtractor:
                 'PROTEIN': 'PROTEIN', 
                 'CHEMICAL': 'CHEMICAL',
                 'DISEASE': 'DISEASE',
-                'CANCER': 'DISEASE'
+                'CANCER': 'DISEASE',
+                'ENTITY': 'GENE'  # Default for generic entities
             }
             entity_type = label_mapping.get(ent.label_, ent.label_)
+            
+            # For generic ENTITY labels, try to infer type from text
+            if ent.label_ == 'ENTITY':
+                entity_type = self._infer_entity_type(ent.text)
             
             # Get UMLS concepts if available
             umls_ids = []
@@ -384,3 +395,44 @@ class BioEntityExtractor:
         
         merged.append(current)
         return merged
+    
+    def _infer_entity_type(self, text: str) -> str:
+        """Infer entity type from text patterns"""
+        text_upper = text.upper()
+        
+        # Known gene/protein patterns
+        gene_patterns = [
+            'TP53', 'P53', 'EGFR', 'VEGF', 'VEGFA', 'BRCA1', 'BRCA2', 'KRAS', 
+            'PIK3CA', 'AKT1', 'MYC', 'PTEN', 'RB1', 'APC', 'CDK4', 'CDK6',
+            'MAPK', 'ERK', 'RAF', 'RAS', 'HER2', 'ERBB2', 'BCL2', 'BAX',
+            'CDKN1A', 'CDKN2A', 'MDM2', 'ATM', 'CHEK2', 'MLH1', 'MSH2'
+        ]
+        
+        # Disease patterns
+        disease_patterns = ['cancer', 'tumor', 'carcinoma', 'melanoma', 'leukemia', 
+                          'lymphoma', 'sarcoma', 'adenoma', 'neoplasm']
+        
+        # Process patterns
+        process_patterns = ['apoptosis', 'proliferation', 'angiogenesis', 'metastasis',
+                          'migration', 'invasion', 'adhesion', 'signaling', 'pathway',
+                          'expression', 'mutation', 'activation', 'inhibition']
+        
+        # Chemical patterns
+        chemical_patterns = ['drug', 'compound', 'inhibitor', 'antibody', 'molecule']
+        
+        # Check patterns
+        if any(gene in text_upper for gene in gene_patterns):
+            return 'GENE'
+        elif any(disease in text.lower() for disease in disease_patterns):
+            return 'DISEASE'
+        elif any(proc in text.lower() for proc in process_patterns):
+            return 'PROCESS'
+        elif any(chem in text.lower() for chem in chemical_patterns):
+            return 'CHEMICAL'
+        elif text_upper.endswith('IN') or text_upper.endswith('ASE') or text_upper.endswith('OR'):
+            return 'PROTEIN'  # Common protein name endings
+        else:
+            # Default to GENE for entities that look like gene names
+            if text.isupper() or (text[0].isupper() and any(c.isdigit() for c in text)):
+                return 'GENE'
+            return 'PROCESS'  # Default for other entities
