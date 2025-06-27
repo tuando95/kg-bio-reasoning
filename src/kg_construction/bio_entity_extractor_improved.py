@@ -269,6 +269,14 @@ class BioEntityExtractor:
     
     def _determine_entity_type(self, ent: Span) -> str:
         """Determine entity type with improved logic"""
+        # ALWAYS check for chemical elements first to avoid misclassification
+        if ent.text.upper() in self.CHEMICAL_ELEMENTS:
+            return 'CHEMICAL'
+        
+        # Check for organisms
+        if ent.text.lower() in self.ORGANISM_PATTERNS:
+            return 'ORGANISM'
+            
         # Extended label mapping
         label_mapping = {
             'GENE_OR_GENE_PRODUCT': 'GENE',
@@ -537,8 +545,9 @@ class BioEntityExtractor:
             # Check for overlap
             if entity.start < current.end:
                 # Keep the one with higher confidence or more specific type
-                type_priority = {'GENE': 5, 'PROTEIN': 4, 'CHEMICAL': 3, 
-                               'DISEASE': 3, 'ORGANISM': 2, 'CELL_TYPE': 2, 'PROCESS': 1}
+                # Chemical elements should have high priority to avoid misclassification
+                type_priority = {'CHEMICAL': 6, 'GENE': 5, 'PROTEIN': 4, 
+                               'DISEASE': 3, 'ORGANISM': 3, 'CELL_TYPE': 2, 'PROCESS': 1}
                 
                 current_priority = type_priority.get(current.entity_type, 0)
                 entity_priority = type_priority.get(entity.entity_type, 0)
