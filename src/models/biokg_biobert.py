@@ -122,28 +122,33 @@ class BioKGBioBERT(nn.Module):
     
     def _build_fusion_module(self, config: Dict) -> nn.Module:
         """Build fusion module based on strategy."""
-        fusion_config = config['model']['fusion']
+        fusion_config = config.get('fusion', {
+            'strategy': 'late',
+            'text_dim': 768,
+            'graph_dim': 512,
+            'fusion_dim': 1024
+        })
         
         if fusion_config['strategy'] == 'early':
             return EarlyFusion(
                 text_dim=fusion_config['text_dim'],
                 graph_dim=fusion_config['graph_dim'],
                 fusion_dim=fusion_config['fusion_dim'],
-                dropout_rate=config['model']['dropout_rate']
+                dropout_rate=config.get('dropout_rate', 0.1)
             )
         elif fusion_config['strategy'] == 'late':
             return LateFusion(
                 text_dim=fusion_config['text_dim'],
                 graph_dim=fusion_config['graph_dim'],
                 fusion_dim=fusion_config['fusion_dim'],
-                dropout_rate=config['model']['dropout_rate']
+                dropout_rate=config.get('dropout_rate', 0.1)
             )
         elif fusion_config['strategy'] == 'cross_modal':
             return CrossModalFusion(
                 text_dim=fusion_config['text_dim'],
                 graph_dim=fusion_config['graph_dim'],
                 fusion_dim=fusion_config['fusion_dim'],
-                dropout_rate=config['model']['dropout_rate']
+                dropout_rate=config.get('dropout_rate', 0.1)
             )
         else:
             # No fusion - text only
