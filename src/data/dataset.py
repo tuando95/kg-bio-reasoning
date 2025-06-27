@@ -75,7 +75,7 @@ class HallmarksOfCancerDataset(Dataset):
         
         # Load dataset
         logger.info(f"Loading HoC dataset split: {split}")
-        self.dataset = load_dataset("qanastek/HoC", split=split)
+        self.dataset = load_dataset("qanastek/HoC", split=split, trust_remote_code=True)
         
         # Cache for knowledge graphs
         self.kg_cache = {} if cache_graphs else None

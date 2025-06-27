@@ -103,7 +103,7 @@ class KnowledgeGraphPreprocessor:
         
         # Load dataset
         logger.info(f"Loading {split} dataset...")
-        dataset = load_dataset("qanastek/HoC", split=split)
+        dataset = load_dataset("qanastek/HoC", split=split, trust_remote_code=True)
         
         # Check for existing cache
         cache_index_path = split_cache_dir / "index.json"
