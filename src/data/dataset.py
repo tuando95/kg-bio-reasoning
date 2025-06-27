@@ -123,7 +123,8 @@ class HallmarksOfCancerDataset(Dataset):
                         for i in range(11) if labels[i] == 1 and i != 7]
             
             # Process through KG pipeline
-            kg_output = self.kg_pipeline.process_text(text, hallmarks)
+            # Use synchronous version for dataset processing
+            kg_output = self.kg_pipeline.process_text_sync(text, hallmarks)
             
             if self.cache_graphs:
                 self.kg_cache[idx] = kg_output

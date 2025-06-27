@@ -139,7 +139,8 @@ class KnowledgeGraphPreprocessor:
                 ]
                 
                 # Process through KG pipeline
-                kg_output = self.kg_pipeline.process_text(text, hallmarks)
+                # Use synchronous version for preprocessing
+                kg_output = self.kg_pipeline.process_text_sync(text, hallmarks)
                 
                 # Prepare data to cache
                 cache_data = {

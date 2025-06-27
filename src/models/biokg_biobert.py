@@ -44,53 +44,76 @@ class BioKGBioBERT(nn.Module):
         self.config = config
         
         # Model components based on configuration
-        self.use_kg = config.get('knowledge_graph', {}).get('enabled', True)
-        self.use_bio_attention = config['model']['bio_attention'].get('enabled', True)
+        self.use_kg = config.get('use_knowledge_graph', True)
+        self.use_bio_attention = config.get('use_bio_attention', True)
         
         # Text encoder with entity awareness
         self.text_encoder = BioBERTEntityAware(config)
         
         # Knowledge graph encoder (if enabled)
         if self.use_kg:
+            gnn_config = config.get('gnn', {
+                'type': 'GAT',
+                'num_layers': 3,
+                'hidden_dim': 512,
+                'num_heads': 4,
+                'dropout': 0.1,
+                'residual': True
+            })
+            config['gnn'] = gnn_config
             self.graph_encoder = BiologicalGraphEncoder(config)
         
         # Biological attention layers (if enabled)
         if self.use_bio_attention:
             # Replace top BioBERT layers with biological attention
-            num_bio_layers = config['model'].get('num_bio_attention_layers', 2)
+            num_bio_layers = config.get('num_bio_attention_layers', 2)
             self.bio_attention_layers = nn.ModuleList([
                 BiologicalTransformerLayer(config) for _ in range(num_bio_layers)
             ])
         
         # Multi-modal fusion
-        self.fusion_strategy = config['model']['fusion']['strategy']
+        fusion_config = config.get('fusion', {
+            'strategy': 'late',
+            'text_dim': 768,
+            'graph_dim': 512,
+            'fusion_dim': 1024
+        })
+        self.fusion_strategy = fusion_config.get('strategy', 'late')
+        config['fusion'] = fusion_config
         self.fusion_module = self._build_fusion_module(config)
         
         # Classification heads
-        self.num_labels = config['model']['num_labels']
+        self.num_labels = config.get('num_labels', 11)
+        dropout_rate = config.get('dropout_rate', 0.1)
+        fusion_dim = config.get('fusion', {}).get('fusion_dim', 1024)
         
         # Primary task: Cancer hallmark classification
         self.hallmark_classifier = BioBERTClassificationHead(
-            hidden_size=config['model']['fusion']['fusion_dim'],
+            hidden_size=fusion_dim,
             num_labels=self.num_labels,
-            dropout_rate=config['model']['dropout_rate']
+            dropout_rate=dropout_rate
         )
         
         # Auxiliary task 1: Pathway activation prediction (if enabled)
-        if config['training']['loss_weights']['pathway_loss'] > 0:
+        loss_weights = config.get('loss_weights', {})
+        if loss_weights.get('pathway_loss', 0) > 0:
             self.pathway_classifier = nn.Linear(
-                config['model']['fusion']['fusion_dim'],
-                config['model'].get('num_pathways', 50)  # Top pathways
+                fusion_dim,
+                config.get('num_pathways', 50)  # Top pathways
             )
+        else:
+            self.pathway_classifier = None
         
         # Auxiliary task 2: Entity consistency validation (if enabled)
-        if config['training']['loss_weights']['consistency_loss'] > 0:
+        if loss_weights.get('consistency_loss', 0) > 0:
             self.consistency_predictor = nn.Sequential(
-                nn.Linear(config['model']['fusion']['fusion_dim'], 256),
+                nn.Linear(fusion_dim, 256),
                 nn.ReLU(),
-                nn.Dropout(config['model']['dropout_rate']),
+                nn.Dropout(dropout_rate),
                 nn.Linear(256, 1)  # Binary consistency score
             )
+        else:
+            self.consistency_predictor = None
         
         logger.info(f"Initialized BioKG-BioBERT model")
         logger.info(f"  - KG enabled: {self.use_kg}")
