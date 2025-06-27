@@ -44,6 +44,12 @@ class BiologicalGAT(nn.Module):
         # Input dimension (will be set dynamically)
         self.input_dim = config.get('input_dim', 768)  # BioBERT dimension
         
+        # Input projection layer if dimensions don't match
+        if self.input_dim != self.hidden_dim:
+            self.input_projection = nn.Linear(self.input_dim, self.hidden_dim)
+        else:
+            self.input_projection = None
+        
         # Node type embeddings
         self.node_type_embedding = nn.Embedding(
             num_embeddings=6,  # gene, protein, pathway, go_term, hallmark, unknown
@@ -132,12 +138,13 @@ class BiologicalGAT(nn.Module):
                 - graph_embedding: Graph-level embedding [batch_size, hidden_dim]
                 - attention_weights: Attention weights from GAT layers
         """
+        # Project input features to hidden dimension if needed
+        if self.input_projection is not None:
+            x = self.input_projection(x)
+        
         # Add node type embeddings
         if node_types is not None:
             type_emb = self.node_type_embedding(node_types)
-            # Project input features to hidden dimension if needed
-            if x.shape[1] != self.hidden_dim:
-                x = F.linear(x, torch.randn(self.hidden_dim, x.shape[1], device=x.device))
             x = x + type_emb
         
         # Store attention weights
