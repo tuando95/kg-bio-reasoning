@@ -1,10 +1,9 @@
 """
-Biological Knowledge Graph Construction Module
+Fixed Biological Knowledge Graph Construction Module v2
 
-This module builds sentence-specific biological knowledge graphs by:
-1. Querying biological databases (KEGG, STRING, Reactome, GO)
-2. Constructing subgraphs with entity relationships
-3. Adding hallmark-specific pathway nodes
+Additional fixes:
+- STRING API now queries each protein individually or in correct batch format
+- Reactome API endpoint corrected
 """
 
 import logging
@@ -19,6 +18,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 import pickle
 import os
+import time
 
 from .bio_entity_extractor import BioEntity
 
@@ -71,6 +71,69 @@ class BiologicalKGBuilder:
         'avoiding_immune_destruction': ['hsa04650', 'hsa04660', 'hsa04672']  # NK cell, T cell, B cell
     }
     
+    # Common gene name mappings
+    GENE_NAME_MAPPINGS = {
+        'P53': 'TP53',
+        'P21': 'CDKN1A',
+        'P16': 'CDKN2A',
+        'P27': 'CDKN1B',
+        'HER2': 'ERBB2',
+        'CMYC': 'MYC',
+        'C-MYC': 'MYC',
+        'N-MYC': 'MYCN',
+        'L-MYC': 'MYCL',
+        'BCL-2': 'BCL2',
+        'BCL-XL': 'BCL2L1',
+        'NF-KB': 'NFKB1',
+        'NFKB': 'NFKB1',
+        'P-AKT': 'AKT1',
+        'PAKT': 'AKT1',
+        'HIF1A': 'HIF1A',
+        'HIF-1A': 'HIF1A',
+        'HIF-1ALPHA': 'HIF1A',
+        'HIF1-ALPHA': 'HIF1A',
+        'VEGF-A': 'VEGFA',
+        'TGF-B': 'TGFB1',
+        'TGFB': 'TGFB1',
+        'TNF-A': 'TNF',
+        'TNFA': 'TNF',
+        'IL-6': 'IL6',
+        'IL6': 'IL6',
+        'STAT-3': 'STAT3',
+        'PDL1': 'CD274',
+        'PD-L1': 'CD274',
+        'PDL-1': 'CD274',
+        'PD1': 'PDCD1',
+        'PD-1': 'PDCD1',
+        'CTLA4': 'CTLA4',
+        'CTLA-4': 'CTLA4'
+    }
+    
+    # Additional identifiers that Reactome might recognize
+    # These can be UniProt IDs or other database identifiers
+    REACTOME_IDENTIFIERS = {
+        'TP53': ['P04637', 'TP53', 'p53'],
+        'BRCA1': ['P38398', 'BRCA1'],
+        'BRCA2': ['P51587', 'BRCA2'],
+        'EGFR': ['P00533', 'EGFR', 'ERBB1'],
+        'KRAS': ['P01116', 'KRAS'],
+        'PIK3CA': ['P42336', 'PIK3CA'],
+        'PTEN': ['P60484', 'PTEN'],
+        'MYC': ['P01106', 'MYC', 'c-Myc'],
+        'AKT1': ['P31749', 'AKT1', 'PKB'],
+        'VEGFA': ['P15692', 'VEGFA', 'VEGF'],
+        'BCL2': ['P10415', 'BCL2'],
+        'NFKB1': ['P19838', 'NFKB1'],
+        'STAT3': ['P40763', 'STAT3'],
+        'HIF1A': ['Q16665', 'HIF1A'],
+        'TGFB1': ['P01137', 'TGFB1'],
+        'TNF': ['P01375', 'TNF', 'TNFA'],
+        'IL6': ['P05231', 'IL6'],
+        'CD274': ['Q9NZQ7', 'CD274', 'PD-L1'],
+        'PDCD1': ['Q15116', 'PDCD1', 'PD-1'],
+        'CTLA4': ['P16410', 'CTLA4']
+    }
+    
     def __init__(self, config: Dict):
         """
         Initialize the KG builder with database configurations.
@@ -96,6 +159,10 @@ class BiologicalKGBuilder:
         # Pending edges to add after nodes are created
         self.pending_edges = []
         
+        # Rate limiting for KEGG
+        self.last_kegg_call = 0
+        self.kegg_delay = 0.35  # ~3 calls per second
+        
     def _init_database_clients(self):
         """Initialize API clients for biological databases"""
         self.db_configs = {}
@@ -106,7 +173,7 @@ class BiologicalKGBuilder:
                 
         # STRING specific settings
         if 'STRING' in self.db_configs:
-            self.string_confidence = self.db_configs['STRING'].get('confidence_threshold', 700)
+            self.string_confidence = self.db_configs['STRING'].get('confidence_threshold', 400)
     
     def _load_cache(self) -> Dict:
         """Load API response cache"""
@@ -124,6 +191,34 @@ class BiologicalKGBuilder:
         cache_file = os.path.join(self.cache_dir, "api_cache.pkl")
         with open(cache_file, 'wb') as f:
             pickle.dump(self.api_cache, f)
+    
+    def _normalize_gene_name(self, name: str) -> str:
+        """Normalize gene names to standard symbols"""
+        name = name.upper().strip()
+        
+        # Check mapping table first
+        if name in self.GENE_NAME_MAPPINGS:
+            return self.GENE_NAME_MAPPINGS[name]
+        
+        # Handle p-prefixed proteins
+        if name.startswith('P') and len(name) > 1 and name[1:].isdigit():
+            # p53 -> TP53, p21 -> CDKN1A, etc.
+            if name == 'P53':
+                return 'TP53'
+            elif name == 'P21':
+                return 'CDKN1A'
+            elif name == 'P16':
+                return 'CDKN2A'
+            elif name == 'P27':
+                return 'CDKN1B'
+        
+        # Remove hyphens for some genes
+        if '-' in name:
+            no_hyphen = name.replace('-', '')
+            if no_hyphen in self.GENE_NAME_MAPPINGS:
+                return self.GENE_NAME_MAPPINGS[no_hyphen]
+        
+        return name
     
     async def build_knowledge_graph(self, entities: List[BioEntity], 
                                   hallmarks: Optional[List[str]] = None) -> nx.MultiDiGraph:
@@ -186,6 +281,9 @@ class BiologicalKGBuilder:
             hallmark_nodes = self._add_hallmark_pathways(hallmarks)
             for node in hallmark_nodes:
                 kg.add_node(node.node_id, **node.__dict__)
+            
+            # Add edges from genes to hallmarks based on pathway associations
+            self._add_gene_hallmark_edges(kg, entity_nodes, hallmarks)
         
         # Expand graph based on max_hops
         if self.max_hops > 0:
@@ -202,28 +300,21 @@ class BiologicalKGBuilder:
     def _create_entity_nodes(self, entities: List[BioEntity]) -> List[KGNode]:
         """Create KG nodes from extracted entities"""
         nodes = []
+        seen_names = set()  # Track seen gene names to avoid duplicates
         
         for entity in entities:
-            # Use primary database ID as node ID
-            primary_db = self._get_primary_database(entity.entity_type)
-            node_id = None
-            
-            if primary_db in entity.normalized_ids:
-                node_id = f"{primary_db}:{entity.normalized_ids[primary_db]}"
-            elif entity.normalized_ids:
-                # Use first available ID
-                db, id_val = next(iter(entity.normalized_ids.items()))
-                node_id = f"{db}:{id_val}"
-            else:
-                # Use entity text as fallback
-                node_id = f"ENTITY:{entity.text}"
-            
-            # Normalize gene/protein names for API calls
-            normalized_name = entity.text.upper()
+            # Normalize gene/protein names
+            normalized_name = entity.text
             if entity.entity_type in ['GENE', 'PROTEIN']:
-                # Handle common variations
-                if normalized_name.startswith('P') and len(normalized_name) > 1 and normalized_name[1:].isdigit():
-                    normalized_name = 'TP' + normalized_name[1:]  # p53 -> TP53
+                normalized_name = self._normalize_gene_name(entity.text)
+            
+            # Skip if we've already seen this normalized name
+            if normalized_name in seen_names:
+                continue
+            seen_names.add(normalized_name)
+            
+            # Use normalized name as primary identifier
+            node_id = f"{entity.entity_type}:{normalized_name}"
             
             node = KGNode(
                 node_id=node_id,
@@ -281,109 +372,156 @@ class BiologicalKGBuilder:
         """Fetch protein-protein interactions from STRING database"""
         edges = []
         
-        # Get protein identifiers
-        protein_ids = []
-        id_to_node = {}
+        # Get gene/protein names
+        gene_names = []
+        name_to_node = {}
         
         for node in nodes:
             if node.node_type in ['gene', 'protein']:
-                # Try to get UniProt or gene ID
-                if 'UNIPROT' in node.properties.get('normalized_ids', {}):
-                    protein_id = node.properties['normalized_ids']['UNIPROT']
-                    protein_ids.append(protein_id)
-                    id_to_node[protein_id] = node
-                elif 'NCBI_GENE' in node.properties.get('normalized_ids', {}):
-                    gene_id = node.properties['normalized_ids']['NCBI_GENE']
-                    protein_ids.append(f"9606.ENSP{gene_id}")  # Human proteins
-                    id_to_node[f"9606.ENSP{gene_id}"] = node
+                gene_names.append(node.name)
+                name_to_node[node.name] = node
+                # Also map lowercase version
+                name_to_node[node.name.lower()] = node
         
-        if not protein_ids:
+        if not gene_names:
+            logger.debug("No gene/protein nodes for STRING query")
             return edges
         
+        # STRING works better with newline-separated identifiers in POST requests
+        # or with the network endpoint using specific formatting
+        
         # Check cache
-        cache_key = f"string_interactions_{'-'.join(sorted(protein_ids))}"
+        cache_key = f"string_interactions_v2_{'-'.join(sorted(gene_names))}"
         if cache_key in self.api_cache:
             cached_data = self.api_cache[cache_key]
-            return self._parse_string_response(cached_data, id_to_node)
+            return self._parse_string_response(cached_data, name_to_node)
         
-        # Query STRING API
+        # Query STRING API - use POST method for multiple proteins
         try:
             async with aiohttp.ClientSession() as session:
-                # STRING expects protein names or identifiers
-                string_ids = []
-                for node in nodes:
-                    if node.node_type in ['gene', 'protein']:
-                        # Map node to both with and without species prefix
-                        string_ids.append(node.name.upper())
-                        id_to_node[node.name.upper()] = node
-                        id_to_node[f"9606.{node.name.upper()}"] = node
+                url = "https://string-db.org/api/tsv/network"
                 
-                if not string_ids:
-                    logger.warning("No valid STRING identifiers found")
-                    return edges
-                
-                url = "https://string-db.org/api/json/network"
-                # STRING expects gene names without species prefix for the identifiers parameter
-                gene_names = [node.name.upper() for node in nodes if node.node_type in ['gene', 'protein']]
-                params = {
-                    'identifiers': '%0d'.join(gene_names[:10]),  # Just gene names, limit to 10
-                    'species': 9606,  # Human
-                    'required_score': 400,  # Lower threshold
+                # Try POST method with form data
+                data = {
+                    'identifiers': '\r'.join(gene_names),  # Carriage return separated
+                    'species': '9606',  # Human
+                    'required_score': str(self.string_confidence),
                     'network_type': 'functional',
-                    'caller_identity': 'biokg_biobert'
+                    'caller_identity': 'biokg_biobert_v2'
                 }
                 
-                logger.debug(f"STRING API call with {len(gene_names)} identifiers")
-                async with session.get(url, params=params, headers={'Accept': 'application/json'}) as response:
+                logger.info(f"STRING API POST call with {len(gene_names)} identifiers")
+                logger.debug(f"STRING identifiers: {gene_names}")
+                
+                async with session.post(url, data=data) as response:
                     if response.status == 200:
-                        # STRING returns text/json, not application/json, so we need to parse manually
                         text = await response.text()
-                        try:
-                            data = json.loads(text)
-                            logger.info(f"STRING returned {len(data)} interactions")
-                            self.api_cache[cache_key] = data
-                            edges = self._parse_string_response(data, id_to_node)
-                        except json.JSONDecodeError as e:
-                            logger.error(f"Failed to parse STRING response: {e}")
-                            logger.debug(f"Response text: {text[:500]}")
+                        # Parse TSV response
+                        lines = text.strip().split('\n')
+                        if len(lines) > 1:  # Has header + data
+                            data_list = []
+                            headers = lines[0].split('\t')
+                            for line in lines[1:]:
+                                values = line.split('\t')
+                                if len(values) == len(headers):
+                                    data_list.append(dict(zip(headers, values)))
+                            
+                            logger.info(f"STRING returned {len(data_list)} interactions")
+                            self.api_cache[cache_key] = data_list
+                            edges = self._parse_string_response(data_list, name_to_node)
+                        else:
+                            logger.warning("STRING returned no interactions")
                     else:
-                        error_text = await response.text()
-                        logger.error(f"STRING API returned status {response.status}: {error_text[:200]}")
+                        # If POST fails, try individual queries
+                        logger.warning(f"STRING POST failed with status {response.status}, trying individual queries")
+                        edges = await self._fetch_string_individual(gene_names, name_to_node)
                         
         except Exception as e:
-            logger.error(f"Error fetching STRING interactions: {e}")
+            logger.error(f"Error fetching STRING interactions: {e}", exc_info=True)
+            # Fallback to individual queries
+            edges = await self._fetch_string_individual(gene_names, name_to_node)
         
         return edges
     
-    def _parse_string_response(self, data: List[Dict], id_to_node: Dict) -> List[KGEdge]:
+    async def _fetch_string_individual(self, gene_names: List[str], name_to_node: Dict) -> List[KGEdge]:
+        """Fetch STRING interactions one protein at a time"""
+        all_interactions = {}
+        edges = []
+        
+        async with aiohttp.ClientSession() as session:
+            for gene_name in gene_names[:10]:  # Limit to 10 to avoid too many requests
+                try:
+                    url = "https://string-db.org/api/tsv/interaction_partners"
+                    params = {
+                        'identifiers': gene_name,
+                        'species': '9606',
+                        'required_score': str(self.string_confidence),
+                        'limit': '20'  # Limit partners per protein
+                    }
+                    
+                    logger.debug(f"STRING individual query for {gene_name}")
+                    
+                    async with session.get(url, params=params) as response:
+                        if response.status == 200:
+                            text = await response.text()
+                            lines = text.strip().split('\n')
+                            if len(lines) > 1:
+                                headers = lines[0].split('\t')
+                                for line in lines[1:]:
+                                    values = line.split('\t')
+                                    if len(values) == len(headers):
+                                        interaction = dict(zip(headers, values))
+                                        # Check if partner is in our node list
+                                        partner = interaction.get('preferredName_B', '')
+                                        if partner in name_to_node:
+                                            key = tuple(sorted([gene_name, partner]))
+                                            if key not in all_interactions:
+                                                all_interactions[key] = interaction
+                        
+                    await asyncio.sleep(0.1)  # Brief delay between requests
+                    
+                except Exception as e:
+                    logger.error(f"Error fetching STRING data for {gene_name}: {e}")
+        
+        # Convert to edges
+        for (gene1, gene2), interaction in all_interactions.items():
+            node1 = name_to_node.get(gene1)
+            node2 = name_to_node.get(gene2)
+            
+            if node1 and node2:
+                score = float(interaction.get('score', 0))
+                edge = KGEdge(
+                    source=node1.node_id,
+                    target=node2.node_id,
+                    edge_type='interacts',
+                    properties={
+                        'score': score,
+                        'database': 'STRING',
+                        'method': 'individual_query'
+                    },
+                    confidence=score / 1000.0
+                )
+                edges.append(edge)
+        
+        logger.info(f"STRING individual queries found {len(edges)} interactions")
+        return edges
+    
+    def _parse_string_response(self, data: List[Dict], name_to_node: Dict) -> List[KGEdge]:
         """Parse STRING API response"""
         edges = []
         
         logger.debug(f"Parsing STRING response with {len(data)} items")
         
         for interaction in data:
-            # STRING API returns preferredName_A and preferredName_B
-            protein_a = None
-            protein_b = None
+            # STRING TSV format has these columns
+            protein_a = interaction.get('preferredName_A', '').strip()
+            protein_b = interaction.get('preferredName_B', '').strip()
+            score = float(interaction.get('score', 0))
             
-            # Try different field names
-            if 'preferredName_A' in interaction and 'preferredName_B' in interaction:
-                protein_a = interaction['preferredName_A']
-                protein_b = interaction['preferredName_B']
-            elif 'stringId_A' in interaction and 'stringId_B' in interaction:
-                protein_a = interaction['stringId_A'].split('.')[-1]
-                protein_b = interaction['stringId_B'].split('.')[-1]
-            
-            if protein_a and protein_b:
+            if protein_a and protein_b and score > 0:
                 # Find matching nodes
-                node_a = None
-                node_b = None
-                
-                for key, node in id_to_node.items():
-                    if protein_a.upper() in key.upper() or protein_a.upper() == node.name.upper():
-                        node_a = node
-                    if protein_b.upper() in key.upper() or protein_b.upper() == node.name.upper():
-                        node_b = node
+                node_a = name_to_node.get(protein_a) or name_to_node.get(protein_a.lower())
+                node_b = name_to_node.get(protein_b) or name_to_node.get(protein_b.lower())
                 
                 if node_a and node_b and node_a != node_b:
                     edge = KGEdge(
@@ -391,13 +529,16 @@ class BiologicalKGBuilder:
                         target=node_b.node_id,
                         edge_type='interacts',
                         properties={
-                            'score': interaction.get('score', 0),
-                            'database': 'STRING'
+                            'score': score,
+                            'database': 'STRING',
+                            'experimental_score': float(interaction.get('experimental', 0)),
+                            'database_score': float(interaction.get('database', 0)),
+                            'text_mining_score': float(interaction.get('textmining', 0))
                         },
-                        confidence=interaction.get('score', 0) / 1000.0
+                        confidence=score / 1000.0  # STRING scores are 0-1000
                     )
                     edges.append(edge)
-                    logger.debug(f"Added edge: {node_a.name} -> {node_b.name}")
+                    logger.debug(f"Added edge: {node_a.name} <-> {node_b.name} (score: {score})")
         
         logger.info(f"Parsed {len(edges)} edges from STRING")
         return edges
@@ -406,51 +547,104 @@ class BiologicalKGBuilder:
         """Fetch pathway memberships from KEGG"""
         edges = []
         
-        # Get gene identifiers
-        gene_ids = []
-        id_to_node = {}
+        # KEGG gene ID mapping for common cancer genes
+        gene_to_kegg_id = {
+            'TP53': '7157',
+            'EGFR': '1956',
+            'ERBB2': '2064',
+            'KRAS': '3845',
+            'BRAF': '673',
+            'PIK3CA': '5290',
+            'PTEN': '5728',
+            'AKT1': '207',
+            'MYC': '4609',
+            'VEGFA': '7422',
+            'BCL2': '596',
+            'BRCA1': '672',
+            'BRCA2': '675',
+            'CDKN2A': '1029',
+            'CDKN1A': '1026',
+            'CDKN1B': '1027',
+            'RB1': '5925',
+            'MDM2': '4193',
+            'NFKB1': '4790',
+            'STAT3': '6774',
+            'HIF1A': '3091',
+            'TGFB1': '7040',
+            'TNF': '7124',
+            'IL6': '3569',
+            'CD274': '29126',  # PD-L1
+            'PDCD1': '5133',   # PD-1
+            'CTLA4': '1493'
+        }
         
+        # Process each gene node
         for node in nodes:
-            if node.node_type == 'gene' and 'NCBI_GENE' in node.properties.get('normalized_ids', {}):
-                gene_id = node.properties['normalized_ids']['NCBI_GENE']
-                gene_ids.append(gene_id)
-                id_to_node[gene_id] = node
-        
-        if not gene_ids:
-            return edges
-        
-        # Query KEGG for each gene
-        async with aiohttp.ClientSession() as session:
-            for gene_id in gene_ids:
-                cache_key = f"kegg_gene_{gene_id}"
+            if node.node_type == 'gene':
+                gene_name = node.name.upper()
+                kegg_id = gene_to_kegg_id.get(gene_name)
                 
-                if cache_key in self.api_cache:
-                    pathways = self.api_cache[cache_key]
-                else:
-                    try:
-                        url = f"{self.db_configs['KEGG']['api_endpoint']}/get/hsa:{gene_id}"
-                        async with session.get(url) as response:
-                            if response.status == 200:
-                                text = await response.text()
-                                pathways = self._parse_kegg_gene(text)
-                                self.api_cache[cache_key] = pathways
-                            else:
-                                pathways = []
-                    except Exception as e:
-                        logger.error(f"Error fetching KEGG data for gene {gene_id}: {e}")
-                        pathways = []
+                if not kegg_id:
+                    # Try to get from normalized IDs
+                    if 'NCBI_GENE' in node.properties.get('normalized_ids', {}):
+                        kegg_id = node.properties['normalized_ids']['NCBI_GENE']
                 
-                # Create pathway membership edges
-                for pathway_id in pathways:
-                    edge = KGEdge(
-                        source=id_to_node[gene_id].node_id,
-                        target=f"KEGG:{pathway_id}",
-                        edge_type='pathway_member',
-                        properties={'database': 'KEGG'},
-                        confidence=1.0
-                    )
-                    edges.append(edge)
+                if kegg_id:
+                    cache_key = f"kegg_gene_{kegg_id}"
+                    
+                    if cache_key in self.api_cache:
+                        pathways = self.api_cache[cache_key]
+                    else:
+                        # Rate limiting for KEGG
+                        current_time = time.time()
+                        time_since_last = current_time - self.last_kegg_call
+                        if time_since_last < self.kegg_delay:
+                            await asyncio.sleep(self.kegg_delay - time_since_last)
+                        
+                        try:
+                            async with aiohttp.ClientSession() as session:
+                                url = f"https://rest.kegg.jp/get/hsa:{kegg_id}"
+                                logger.debug(f"KEGG API call for gene {gene_name} (ID: {kegg_id})")
+                                
+                                async with session.get(url) as response:
+                                    self.last_kegg_call = time.time()
+                                    
+                                    if response.status == 200:
+                                        text = await response.text()
+                                        pathways = self._parse_kegg_gene(text)
+                                        self.api_cache[cache_key] = pathways
+                                        logger.debug(f"KEGG found {len(pathways)} pathways for {gene_name}")
+                                    else:
+                                        logger.warning(f"KEGG API returned status {response.status} for gene {kegg_id}")
+                                        pathways = []
+                        except Exception as e:
+                            logger.error(f"Error fetching KEGG data for gene {kegg_id}: {e}")
+                            pathways = []
+                    
+                    # Create pathway membership edges
+                    for pathway_id in pathways:
+                        pathway_node_id = f"KEGG:{pathway_id}"
+                        
+                        # Create pathway node
+                        pathway_node = KGNode(
+                            node_id=pathway_node_id,
+                            node_type='pathway',
+                            name=self._get_pathway_name(pathway_id),
+                            properties={'database': 'KEGG', 'pathway_id': pathway_id}
+                        )
+                        self.pending_edges.append(pathway_node)
+                        
+                        # Create edge
+                        edge = KGEdge(
+                            source=node.node_id,
+                            target=pathway_node_id,
+                            edge_type='pathway_member',
+                            properties={'database': 'KEGG'},
+                            confidence=1.0
+                        )
+                        edges.append(edge)
         
+        logger.info(f"KEGG pathways: found {len(edges)} pathway memberships")
         return edges
     
     def _parse_kegg_gene(self, kegg_text: str) -> List[str]:
@@ -477,123 +671,230 @@ class BiologicalKGBuilder:
         return pathways
     
     async def _fetch_reactome_pathways(self, nodes: List[KGNode]) -> List[KGEdge]:
-        """Fetch pathway information from Reactome"""
+        """Fetch pathway information from Reactome using ContentService API"""
         edges = []
         
-        # Get protein identifiers
-        protein_ids = []
-        id_to_node = {}
+        # Collect gene names
+        gene_names = []
+        name_to_node = {}
         
         for node in nodes:
-            if 'UNIPROT' in node.properties.get('normalized_ids', {}):
-                protein_id = node.properties['normalized_ids']['UNIPROT']
-                protein_ids.append(protein_id)
-                id_to_node[protein_id] = node
+            if node.node_type in ['gene', 'protein']:
+                gene_names.append(node.name)
+                name_to_node[node.name] = node
         
-        if not protein_ids:
+        if not gene_names:
             return edges
         
-        # Query Reactome API
-        cache_key = f"reactome_pathways_{'-'.join(sorted(protein_ids))}"
+        # Query Reactome ContentService API
+        cache_key = f"reactome_pathways_v4_{'-'.join(sorted(gene_names))}"
         
         if cache_key in self.api_cache:
-            pathways = self.api_cache[cache_key]
+            all_pathways = self.api_cache[cache_key]
         else:
+            all_pathways = {}
             try:
                 async with aiohttp.ClientSession() as session:
-                    url = f"{self.db_configs['Reactome']['api_endpoint']}/identifiers/projection"
-                    headers = {'Content-Type': 'text/plain'}
-                    data = '\n'.join(protein_ids)
-                    
-                    async with session.post(url, data=data, headers=headers) as response:
-                        if response.status == 200:
-                            pathways = await response.json()
-                            self.api_cache[cache_key] = pathways
-                        else:
-                            pathways = []
+                    # Search for each gene individually using the working approach
+                    for gene_name in gene_names[:10]:  # Limit to avoid too many requests
+                        # Search for the gene
+                        search_url = f"https://reactome.org/ContentService/search/query?query={gene_name}&species=Homo%20sapiens"
+                        logger.debug(f"Reactome search for {gene_name}")
+                        
+                        async with session.get(search_url, headers={'Accept': 'application/json'}) as search_response:
+                            if search_response.status == 200:
+                                search_data = await search_response.json()
+                                
+                                # Look through results for protein entries
+                                entity_found = False
+                                
+                                for result in search_data.get('results', []):
+                                    if entity_found:
+                                        break
+                                        
+                                    if result.get('typeName') == 'Protein' and 'entries' in result:
+                                        # Process entries within the Protein result
+                                        for entry in result['entries']:
+                                            if entity_found:
+                                                break
+                                                
+                                            # Check if this is a human protein
+                                            species_list = entry.get('species', [])
+                                            if isinstance(species_list, list) and any('Homo sapiens' in str(s) for s in species_list):
+                                                entity_id = entry.get('stId')
+                                                
+                                                if entity_id:
+                                                    # Get pathways for this entity
+                                                    pathways_url = f"https://reactome.org/ContentService/data/pathways/low/entity/{entity_id}?species=9606"
+                                                    
+                                                    async with session.get(pathways_url, headers={'Accept': 'application/json'}) as pathway_response:
+                                                        if pathway_response.status == 200:
+                                                            pathways = await pathway_response.json()
+                                                            logger.info(f"Reactome found {len(pathways)} pathways for {gene_name} (entity: {entity_id})")
+                                                            
+                                                            # Store pathways
+                                                            pathways_for_gene = []
+                                                            for pathway in pathways[:20]:  # Limit pathways
+                                                                pathways_for_gene.append({
+                                                                    'stId': pathway.get('stId', ''),
+                                                                    'displayName': pathway.get('displayName', ''),
+                                                                    'dbId': pathway.get('dbId', '')
+                                                                })
+                                                            
+                                                            if pathways_for_gene:
+                                                                all_pathways[gene_name] = pathways_for_gene
+                                                                entity_found = True
+                                                                break
+                                                        else:
+                                                            logger.warning(f"Failed to get pathways for {entity_id}: status {pathway_response.status}")
+                                
+                                # If no protein found, try looking for the gene in pathway names
+                                if not entity_found:
+                                    pathways_for_gene = []
+                                    
+                                    # Also check Pathway results
+                                    for result in search_data.get('results', []):
+                                        if result.get('typeName') == 'Pathway' and 'entries' in result:
+                                            for entry in result['entries'][:10]:
+                                                name = entry.get('name', '')
+                                                # Remove HTML tags
+                                                import re
+                                                clean_name = re.sub('<[^<]+?>', '', name)
+                                                
+                                                # Check if gene name is in pathway name
+                                                if gene_name in clean_name:
+                                                    species_list = entry.get('species', [])
+                                                    if not species_list or any('Homo sapiens' in str(s) for s in species_list):
+                                                        stId = entry.get('stId') or entry.get('id')
+                                                        if stId:
+                                                            pathways_for_gene.append({
+                                                                'stId': stId,
+                                                                'displayName': clean_name,
+                                                                'dbId': entry.get('dbId', '')
+                                                            })
+                                    
+                                    if pathways_for_gene:
+                                        all_pathways[gene_name] = pathways_for_gene[:10]
+                                        logger.debug(f"Found {len(pathways_for_gene)} pathways for {gene_name} via pathway search")
+                            else:
+                                logger.warning(f"Reactome search failed for {gene_name}: status {search_response.status}")
+                        
+                        # Brief delay between searches
+                        await asyncio.sleep(0.1)
+                            
+                self.api_cache[cache_key] = all_pathways
+                
             except Exception as e:
-                logger.error(f"Error fetching Reactome pathways: {e}")
-                pathways = []
+                logger.error(f"Error fetching Reactome pathways: {e}", exc_info=True)
         
-        # Parse response and create edges
-        for pathway in pathways:
-            if 'identifier' in pathway and pathway['identifier'] in id_to_node:
-                for reaction in pathway.get('pathways', []):
-                    edge = KGEdge(
-                        source=id_to_node[pathway['identifier']].node_id,
-                        target=f"REACTOME:{reaction['stId']}",
-                        edge_type='pathway_member',
-                        properties={
-                            'pathway_name': reaction.get('displayName', ''),
-                            'database': 'Reactome'
-                        },
-                        confidence=1.0
-                    )
-                    edges.append(edge)
+        # Create edges for pathways
+        for gene_name, pathways in all_pathways.items():
+            if gene_name in name_to_node:
+                node = name_to_node[gene_name]
+                
+                for pathway in pathways:
+                    pathway_id = pathway.get('stId', '')
+                    pathway_name = pathway.get('displayName', '')
+                    
+                    if pathway_id:
+                        pathway_node_id = f"REACTOME:{pathway_id}"
+                        
+                        # Create pathway node
+                        pathway_node = KGNode(
+                            node_id=pathway_node_id,
+                            node_type='pathway',
+                            name=pathway_name,
+                            properties={
+                                'database': 'Reactome',
+                                'pathway_id': pathway_id,
+                                'species': 'Homo sapiens'
+                            }
+                        )
+                        self.pending_edges.append(pathway_node)
+                        
+                        # Create edge
+                        edge = KGEdge(
+                            source=node.node_id,
+                            target=pathway_node_id,
+                            edge_type='pathway_member',
+                            properties={
+                                'database': 'Reactome',
+                                'pathway_name': pathway_name
+                            },
+                            confidence=1.0
+                        )
+                        edges.append(edge)
         
+        logger.info(f"Reactome pathways: found {len(edges)} pathway memberships")
         return edges
     
     async def _fetch_pathway_nodes(self, entity_nodes: List[KGNode]) -> List[KGNode]:
-        """Fetch pathway nodes connected to entities"""
-        pathway_nodes = []
-        pathway_ids = set()
+        """Return pathway nodes that were created during edge fetching"""
+        # The pending_edges list contains pathway nodes that need to be added
+        pathway_nodes = [edge for edge in self.pending_edges if isinstance(edge, KGNode)]
         
-        # Collect unique pathway IDs from edges
-        # This is simplified - in practice would query the graph
+        # Clear pathway nodes from pending edges
+        self.pending_edges = [edge for edge in self.pending_edges if isinstance(edge, KGEdge)]
         
-        # Add KEGG pathway nodes
-        for node in entity_nodes:
-            if node.node_type == 'gene':
-                # Add common cancer pathways based on gene names
-                gene_pathway_map = {
-                    'TP53': ['hsa04115'],  # p53 signaling
-                    'P53': ['hsa04115'],
-                    'EGFR': ['hsa04010', 'hsa04012'],  # MAPK, ErbB signaling
-                    'VEGF': ['hsa04370'],  # VEGF signaling
-                    'VEGFA': ['hsa04370'],
-                    'BRCA1': ['hsa04110', 'hsa04115'],  # Cell cycle, p53
-                    'BRCA2': ['hsa04110', 'hsa04115'],
-                    'KRAS': ['hsa04010'],  # MAPK
-                    'PIK3CA': ['hsa04151'],  # PI3K-Akt
-                    'AKT1': ['hsa04151'],
-                    'MYC': ['hsa04110'],  # Cell cycle
-                    'PTEN': ['hsa04151']  # PI3K-Akt
-                }
-                
-                gene_name = node.name.upper()
-                if gene_name in gene_pathway_map:
-                    pathway_ids.update(gene_pathway_map[gene_name])
+        # Also add some cancer-specific pathways based on extracted genes
+        gene_names = [node.name.upper() for node in entity_nodes if node.node_type == 'gene']
         
-        # Create pathway nodes
-        for pathway_id in pathway_ids:
-            if pathway_id.startswith('hsa'):
-                # KEGG pathway
-                node = KGNode(
-                    node_id=f"KEGG:{pathway_id}",
-                    node_type='pathway',
-                    name=self._get_pathway_name(pathway_id),
-                    properties={'database': 'KEGG', 'pathway_id': pathway_id}
-                )
-                pathway_nodes.append(node)
-                
-                # Add edges from genes to pathways
-                for entity_node in entity_nodes:
-                    if entity_node.node_type == 'gene' and entity_node.name.upper() in gene_pathway_map:
-                        if pathway_id in gene_pathway_map[entity_node.name.upper()]:
-                            edge = KGEdge(
-                                source=entity_node.node_id,
-                                target=f"KEGG:{pathway_id}",
-                                edge_type='pathway_member',
-                                properties={'database': 'KEGG'},
-                                confidence=0.8
-                            )
-                            self.pending_edges.append(edge)
+        # Map of genes to their key pathways
+        gene_pathway_map = {
+            'TP53': ['hsa04115'],  # p53 signaling
+            'EGFR': ['hsa04010', 'hsa04012'],  # MAPK, ErbB signaling
+            'VEGFA': ['hsa04370'],  # VEGF signaling
+            'BRCA1': ['hsa04110', 'hsa04115'],  # Cell cycle, p53
+            'BRCA2': ['hsa04110', 'hsa04115'],
+            'KRAS': ['hsa04010'],  # MAPK
+            'PIK3CA': ['hsa04151'],  # PI3K-Akt
+            'AKT1': ['hsa04151'],
+            'MYC': ['hsa04110'],  # Cell cycle
+            'PTEN': ['hsa04151'],  # PI3K-Akt
+            'HIF1A': ['hsa04066'],  # HIF-1 signaling
+            'NFKB1': ['hsa04064'],  # NF-kappa B signaling
+            'BCL2': ['hsa04210'],  # Apoptosis
+            'TGFB1': ['hsa04350'],  # TGF-beta signaling
+            'TNF': ['hsa04668'],  # TNF signaling
+            'IL6': ['hsa04630'],  # JAK-STAT signaling
+            'STAT3': ['hsa04630'],
+            'CD274': ['hsa04514'],  # Cell adhesion molecules
+            'PDCD1': ['hsa04514'],
+            'CTLA4': ['hsa04514']
+        }
+        
+        added_pathways = set()
+        for gene_name in gene_names:
+            if gene_name in gene_pathway_map:
+                for pathway_id in gene_pathway_map[gene_name]:
+                    if pathway_id not in added_pathways:
+                        added_pathways.add(pathway_id)
+                        
+                        pathway_node = KGNode(
+                            node_id=f"KEGG:{pathway_id}",
+                            node_type='pathway',
+                            name=self._get_pathway_name(pathway_id),
+                            properties={'database': 'KEGG', 'pathway_id': pathway_id}
+                        )
+                        pathway_nodes.append(pathway_node)
+                        
+                        # Add edge from gene to pathway
+                        for entity_node in entity_nodes:
+                            if entity_node.node_type == 'gene' and entity_node.name.upper() == gene_name:
+                                edge = KGEdge(
+                                    source=entity_node.node_id,
+                                    target=f"KEGG:{pathway_id}",
+                                    edge_type='pathway_member',
+                                    properties={'database': 'KEGG', 'inferred': True},
+                                    confidence=0.8
+                                )
+                                self.pending_edges.append(edge)
         
         return pathway_nodes
     
     def _get_pathway_name(self, pathway_id: str) -> str:
         """Get human-readable pathway name"""
-        # Simplified mapping - in practice would query KEGG
+        # Extended pathway name mapping
         pathway_names = {
             'hsa04115': 'p53 signaling pathway',
             'hsa04010': 'MAPK signaling pathway',
@@ -602,9 +903,28 @@ class BiologicalKGBuilder:
             'hsa04151': 'PI3K-Akt signaling pathway',
             'hsa04110': 'Cell cycle',
             'hsa04066': 'HIF-1 signaling pathway',
-            'hsa04370': 'VEGF signaling pathway'
+            'hsa04370': 'VEGF signaling pathway',
+            'hsa04012': 'ErbB signaling pathway',
+            'hsa04350': 'TGF-beta signaling pathway',
+            'hsa04630': 'JAK-STAT signaling pathway',
+            'hsa04064': 'NF-kappa B signaling pathway',
+            'hsa04668': 'TNF signaling pathway',
+            'hsa04620': 'Toll-like receptor signaling pathway',
+            'hsa04514': 'Cell adhesion molecules',
+            'hsa04650': 'Natural killer cell mediated cytotoxicity',
+            'hsa04660': 'T cell receptor signaling pathway',
+            'hsa04672': 'Intestinal immune network for IgA production',
+            'hsa04510': 'Focal adhesion',
+            'hsa04810': 'Regulation of actin cytoskeleton',
+            'hsa04670': 'Leukocyte transendothelial migration',
+            'hsa03430': 'Mismatch repair',
+            'hsa03440': 'Homologous recombination',
+            'hsa04152': 'AMPK signaling pathway',
+            'hsa00010': 'Glycolysis / Gluconeogenesis',
+            'hsa00020': 'Citrate cycle (TCA cycle)',
+            'hsa04215': 'Apoptosis - multiple species'
         }
-        return pathway_names.get(pathway_id, pathway_id)
+        return pathway_names.get(pathway_id, f"KEGG pathway {pathway_id}")
     
     def _add_hallmark_pathways(self, hallmarks: List[str]) -> List[KGNode]:
         """Add cancer hallmark-specific pathway nodes"""
@@ -634,6 +954,19 @@ class BiologicalKGBuilder:
                         }
                     )
                     hallmark_nodes.append(pathway_node)
+                    
+                    # Add edge from hallmark to its associated pathway
+                    edge = KGEdge(
+                        source=f"HALLMARK:{hallmark}",
+                        target=f"KEGG:{pathway_id}",
+                        edge_type='hallmark_pathway',
+                        properties={
+                            'relationship': 'associated_with',
+                            'database': 'KEGG'
+                        },
+                        confidence=0.9
+                    )
+                    self.pending_edges.append(edge)
         
         return hallmark_nodes
     
@@ -682,17 +1015,33 @@ class BiologicalKGBuilder:
         seed_ids = {node.node_id for node in seed_nodes}
         relevance_scores = {}
         
+        # Always keep hallmark nodes and seed nodes
+        hallmark_nodes = set()
+        
         for node in kg.nodes():
+            node_data = kg.nodes[node]
+            
+            # Always keep seed nodes with highest relevance
             if node in seed_ids:
-                relevance_scores[node] = 1.0
+                relevance_scores[node] = 2.0  # Highest priority
+            # Always keep hallmark nodes with high relevance
+            elif node_data.get('node_type') == 'hallmark':
+                relevance_scores[node] = 1.5  # High priority
+                hallmark_nodes.add(node)
             else:
-                # Score based on connectivity to seed nodes
+                # Score based on connectivity to seed nodes and hallmarks
                 paths_to_seeds = 0
+                paths_to_hallmarks = 0
+                
                 for seed_id in seed_ids:
                     if nx.has_path(kg, node, seed_id):
                         paths_to_seeds += 1
                 
-                relevance_scores[node] = paths_to_seeds / len(seed_ids)
+                for hallmark_id in hallmark_nodes:
+                    if nx.has_path(kg, node, hallmark_id):
+                        paths_to_hallmarks += 0.5  # Half weight for hallmark connections
+                
+                relevance_scores[node] = (paths_to_seeds + paths_to_hallmarks) / len(seed_ids)
         
         # Keep top nodes by relevance
         sorted_nodes = sorted(relevance_scores.items(), key=lambda x: x[1], reverse=True)
@@ -702,3 +1051,40 @@ class BiologicalKGBuilder:
         pruned_kg = kg.subgraph(nodes_to_keep).copy()
         
         return pruned_kg
+    
+    def _add_gene_hallmark_edges(self, kg: nx.MultiDiGraph, gene_nodes: List[KGNode], hallmarks: List[str]):
+        """Add edges between genes and hallmarks based on pathway associations"""
+        # Map of pathways to hallmarks
+        pathway_to_hallmarks = {}
+        for hallmark in hallmarks:
+            if hallmark in self.HALLMARK_PATHWAYS:
+                for pathway_id in self.HALLMARK_PATHWAYS[hallmark]:
+                    pathway_key = f"KEGG:{pathway_id}"
+                    if pathway_key not in pathway_to_hallmarks:
+                        pathway_to_hallmarks[pathway_key] = []
+                    pathway_to_hallmarks[pathway_key].append(hallmark)
+        
+        # For each gene, check if it's connected to hallmark pathways
+        for gene_node in gene_nodes:
+            if gene_node.node_type == 'gene':
+                # Find all pathways this gene is connected to
+                gene_pathways = set()
+                for _, target, data in kg.out_edges(gene_node.node_id, data=True):
+                    if data.get('edge_type') == 'pathway_member':
+                        gene_pathways.add(target)
+                
+                # Check if any of these pathways are associated with hallmarks
+                for pathway in gene_pathways:
+                    if pathway in pathway_to_hallmarks:
+                        for hallmark in pathway_to_hallmarks[pathway]:
+                            # Add edge from gene to hallmark
+                            kg.add_edge(
+                                gene_node.node_id,
+                                f"HALLMARK:{hallmark}",
+                                edge_type='gene_hallmark',
+                                properties={
+                                    'via_pathway': pathway,
+                                    'relationship': 'contributes_to'
+                                },
+                                confidence=0.7
+                            )
