@@ -168,7 +168,8 @@ class BiologicalPathwayGuidedAttention(nn.Module):
         # Apply attention mask
         if attention_mask is not None:
             mask = attention_mask.unsqueeze(1).unsqueeze(2)
-            scores = scores.masked_fill(mask == 0, -1e9)
+            # Use smaller value for half precision compatibility
+            scores = scores.masked_fill(mask == 0, -1e4)
         
         # Compute attention weights
         attention_weights = F.softmax(scores, dim=-1)
