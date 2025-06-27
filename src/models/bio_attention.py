@@ -303,18 +303,17 @@ class BiologicalPathwayGuidedAttention(nn.Module):
         # Weight by pathway relevance
         weighted_scores = token_pathway_scores * pathway_relevance_scores.unsqueeze(1)
         
-        # Compute pairwise pathway similarity between tokens
+        # For simplicity in baseline, just use cosine similarity of pathway associations
+        # to compute bias (avoiding the shape mismatch issue)
         for i in range(seq_len):
             for j in range(seq_len):
-                # Concatenate pathway associations
-                pair_features = torch.cat([
-                    weighted_scores[:, i, :],
-                    weighted_scores[:, j, :]
-                ], dim=-1)  # [batch_size, num_pathways * 2]
+                # Compute cosine similarity between pathway associations
+                score_i = weighted_scores[:, i, :]  # [batch_size, num_pathways]
+                score_j = weighted_scores[:, j, :]  # [batch_size, num_pathways]
                 
-                # Compute relevance score
-                relevance = self.pathway_relevance_matrix(pair_features).squeeze(-1)
-                bias_matrix[:, i, j] = relevance
+                # Cosine similarity
+                similarity = F.cosine_similarity(score_i, score_j, dim=-1)
+                bias_matrix[:, i, j] = similarity * 0.1  # Scale down the bias
         
         return bias_matrix
     
