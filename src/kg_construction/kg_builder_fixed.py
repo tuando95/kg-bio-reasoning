@@ -281,6 +281,9 @@ class BiologicalKGBuilder:
             hallmark_nodes = self._add_hallmark_pathways(hallmarks)
             for node in hallmark_nodes:
                 kg.add_node(node.node_id, **node.__dict__)
+            
+            # Add edges from genes to hallmarks based on pathway associations
+            self._add_gene_hallmark_edges(kg, entity_nodes, hallmarks)
         
         # Expand graph based on max_hops
         if self.max_hops > 0:
@@ -951,6 +954,19 @@ class BiologicalKGBuilder:
                         }
                     )
                     hallmark_nodes.append(pathway_node)
+                    
+                    # Add edge from hallmark to its associated pathway
+                    edge = KGEdge(
+                        source=f"HALLMARK:{hallmark}",
+                        target=f"KEGG:{pathway_id}",
+                        edge_type='hallmark_pathway',
+                        properties={
+                            'relationship': 'associated_with',
+                            'database': 'KEGG'
+                        },
+                        confidence=0.9
+                    )
+                    self.pending_edges.append(edge)
         
         return hallmark_nodes
     
@@ -999,17 +1015,33 @@ class BiologicalKGBuilder:
         seed_ids = {node.node_id for node in seed_nodes}
         relevance_scores = {}
         
+        # Always keep hallmark nodes and seed nodes
+        hallmark_nodes = set()
+        
         for node in kg.nodes():
+            node_data = kg.nodes[node]
+            
+            # Always keep seed nodes with highest relevance
             if node in seed_ids:
-                relevance_scores[node] = 1.0
+                relevance_scores[node] = 2.0  # Highest priority
+            # Always keep hallmark nodes with high relevance
+            elif node_data.get('node_type') == 'hallmark':
+                relevance_scores[node] = 1.5  # High priority
+                hallmark_nodes.add(node)
             else:
-                # Score based on connectivity to seed nodes
+                # Score based on connectivity to seed nodes and hallmarks
                 paths_to_seeds = 0
+                paths_to_hallmarks = 0
+                
                 for seed_id in seed_ids:
                     if nx.has_path(kg, node, seed_id):
                         paths_to_seeds += 1
                 
-                relevance_scores[node] = paths_to_seeds / len(seed_ids)
+                for hallmark_id in hallmark_nodes:
+                    if nx.has_path(kg, node, hallmark_id):
+                        paths_to_hallmarks += 0.5  # Half weight for hallmark connections
+                
+                relevance_scores[node] = (paths_to_seeds + paths_to_hallmarks) / len(seed_ids)
         
         # Keep top nodes by relevance
         sorted_nodes = sorted(relevance_scores.items(), key=lambda x: x[1], reverse=True)
@@ -1019,3 +1051,40 @@ class BiologicalKGBuilder:
         pruned_kg = kg.subgraph(nodes_to_keep).copy()
         
         return pruned_kg
+    
+    def _add_gene_hallmark_edges(self, kg: nx.MultiDiGraph, gene_nodes: List[KGNode], hallmarks: List[str]):
+        """Add edges between genes and hallmarks based on pathway associations"""
+        # Map of pathways to hallmarks
+        pathway_to_hallmarks = {}
+        for hallmark in hallmarks:
+            if hallmark in self.HALLMARK_PATHWAYS:
+                for pathway_id in self.HALLMARK_PATHWAYS[hallmark]:
+                    pathway_key = f"KEGG:{pathway_id}"
+                    if pathway_key not in pathway_to_hallmarks:
+                        pathway_to_hallmarks[pathway_key] = []
+                    pathway_to_hallmarks[pathway_key].append(hallmark)
+        
+        # For each gene, check if it's connected to hallmark pathways
+        for gene_node in gene_nodes:
+            if gene_node.node_type == 'gene':
+                # Find all pathways this gene is connected to
+                gene_pathways = set()
+                for _, target, data in kg.out_edges(gene_node.node_id, data=True):
+                    if data.get('edge_type') == 'pathway_member':
+                        gene_pathways.add(target)
+                
+                # Check if any of these pathways are associated with hallmarks
+                for pathway in gene_pathways:
+                    if pathway in pathway_to_hallmarks:
+                        for hallmark in pathway_to_hallmarks[pathway]:
+                            # Add edge from gene to hallmark
+                            kg.add_edge(
+                                gene_node.node_id,
+                                f"HALLMARK:{hallmark}",
+                                edge_type='gene_hallmark',
+                                properties={
+                                    'via_pathway': pathway,
+                                    'relationship': 'contributes_to'
+                                },
+                                confidence=0.7
+                            )
