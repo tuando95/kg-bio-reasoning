@@ -428,20 +428,29 @@ class HoCDataModule:
             entity_types[i, :len(et)] = et
             entity_confidences[i, :len(ec)] = ec
         
-        # Batch biological context
+        # Batch biological context with padding
+        # Entity embeddings - pad to max number of entities
+        entity_emb_list = [sample['biological_context']['entity_embeddings'] for sample in batch]
+        max_entities_emb = max(emb.shape[0] for emb in entity_emb_list)
+        entity_embeddings = torch.zeros(len(batch), max_entities_emb, 768)
+        for i, emb in enumerate(entity_emb_list):
+            entity_embeddings[i, :emb.shape[0]] = emb
+        
+        # Pathway embeddings - pad to max number of pathways
+        pathway_emb_list = [sample['biological_context']['pathway_embeddings'] for sample in batch]
+        max_pathways = max(emb.shape[0] for emb in pathway_emb_list)
+        pathway_embeddings = torch.zeros(len(batch), max_pathways, 768)
+        pathway_scores = torch.zeros(len(batch), max_pathways)
+        
+        for i, (emb, scores) in enumerate(zip(pathway_emb_list, 
+                                             [sample['biological_context']['pathway_relevance_scores'] for sample in batch])):
+            pathway_embeddings[i, :emb.shape[0]] = emb
+            pathway_scores[i, :scores.shape[0]] = scores
+        
         biological_context = {
-            'entity_embeddings': torch.stack([
-                sample['biological_context']['entity_embeddings'] 
-                for sample in batch
-            ]),
-            'pathway_embeddings': torch.stack([
-                sample['biological_context']['pathway_embeddings']
-                for sample in batch
-            ]),
-            'pathway_relevance_scores': torch.stack([
-                sample['biological_context']['pathway_relevance_scores']
-                for sample in batch
-            ]),
+            'entity_embeddings': entity_embeddings,
+            'pathway_embeddings': pathway_embeddings,
+            'pathway_relevance_scores': pathway_scores,
             'entity_to_token_map': entity_mappings
         }
         
