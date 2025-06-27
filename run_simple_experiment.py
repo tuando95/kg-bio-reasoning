@@ -49,6 +49,7 @@ def run_simple_baseline():
         # Initialize data module
         logger.info("Initializing data module...")
         data_module = HoCDataModule(config)
+        data_module.setup()  # Initialize datasets
         
         # Initialize model
         logger.info("Initializing model...")
