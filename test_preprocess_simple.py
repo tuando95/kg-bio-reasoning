@@ -45,7 +45,7 @@ async def test_preprocessing():
             
             if entities:
                 # Build KG
-                kg = await pipeline.construct_knowledge_graph(text)
+                kg = await pipeline.process_text(text)
                 nodes = kg['nodes'] if isinstance(kg, dict) else kg.number_of_nodes()
                 edges = kg['edges'] if isinstance(kg, dict) else kg.number_of_edges()
                 
