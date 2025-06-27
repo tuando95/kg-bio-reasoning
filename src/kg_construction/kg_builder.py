@@ -333,15 +333,22 @@ class BiologicalKGBuilder:
                     'caller_identity': 'biokg_biobert'
                 }
                 
-                logger.debug(f"STRING API call with {len(string_ids)} identifiers")
+                logger.debug(f"STRING API call with {len(gene_names)} identifiers")
                 async with session.get(url, params=params) as response:
                     if response.status == 200:
-                        data = await response.json()
-                        logger.info(f"STRING returned {len(data)} interactions")
-                        self.api_cache[cache_key] = data
-                        edges = self._parse_string_response(data, id_to_node)
+                        # STRING returns text/json, not application/json, so we need to parse manually
+                        text = await response.text()
+                        try:
+                            data = json.loads(text)
+                            logger.info(f"STRING returned {len(data)} interactions")
+                            self.api_cache[cache_key] = data
+                            edges = self._parse_string_response(data, id_to_node)
+                        except json.JSONDecodeError as e:
+                            logger.error(f"Failed to parse STRING response: {e}")
+                            logger.debug(f"Response text: {text[:500]}")
                     else:
-                        logger.error(f"STRING API returned status {response.status}")
+                        error_text = await response.text()
+                        logger.error(f"STRING API returned status {response.status}: {error_text[:200]}")
                         
         except Exception as e:
             logger.error(f"Error fetching STRING interactions: {e}")
