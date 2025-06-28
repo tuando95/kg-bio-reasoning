@@ -20,7 +20,7 @@ import logging
 from datetime import datetime
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.metrics import confusion_matrix, classification_report
+from sklearn.metrics import confusion_matrix, classification_report, f1_score, precision_recall_curve
 
 # Add src to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -180,7 +180,66 @@ def analyze_per_hallmark_performance(predictions, targets, threshold=0.5):
     return pd.DataFrame(results)
 
 
-def plot_confusion_matrices(predictions, targets, threshold=0.5, save_path='confusion_matrices.png'):
+def find_optimal_thresholds(predictions, targets):
+    """Find optimal threshold for each hallmark."""
+    
+    hallmark_names = {
+        0: "Evading growth suppressors",
+        1: "Tumor promoting inflammation",
+        2: "Enabling replicative immortality",
+        3: "Cellular energetics",
+        4: "Resisting cell death",
+        5: "Activating invasion and metastasis",
+        6: "Genomic instability and mutation",
+        7: "None",
+        8: "Inducing angiogenesis",
+        9: "Sustaining proliferative signaling",
+        10: "Avoiding immune destruction"
+    }
+    
+    optimal_thresholds = {}
+    threshold_analysis = []
+    
+    for i in range(11):
+        y_true = targets[:, i].numpy()
+        y_scores = predictions[:, i].numpy()
+        
+        # Skip if no positive samples
+        if y_true.sum() == 0:
+            optimal_thresholds[i] = 0.5
+            continue
+        
+        # Calculate precision-recall curve
+        precisions, recalls, thresholds = precision_recall_curve(y_true, y_scores)
+        
+        # Calculate F1 scores for each threshold
+        f1_scores = 2 * (precisions * recalls) / (precisions + recalls + 1e-8)
+        
+        # Find threshold that maximizes F1
+        best_idx = np.argmax(f1_scores)
+        best_threshold = thresholds[best_idx] if best_idx < len(thresholds) else 0.5
+        best_f1 = f1_scores[best_idx]
+        
+        # Calculate F1 at default threshold (0.5)
+        default_f1 = f1_score(y_true, (y_scores >= 0.5).astype(int))
+        
+        optimal_thresholds[i] = float(best_threshold)
+        
+        threshold_analysis.append({
+            'hallmark_id': i,
+            'hallmark_name': hallmark_names[i],
+            'optimal_threshold': float(best_threshold),
+            'optimal_f1': float(best_f1),
+            'default_threshold': 0.5,
+            'default_f1': float(default_f1),
+            'f1_improvement': float(best_f1 - default_f1),
+            'support': int(y_true.sum())
+        })
+    
+    return optimal_thresholds, pd.DataFrame(threshold_analysis)
+
+
+def plot_confusion_matrices(predictions, targets, threshold=0.5, save_path='confusion_matrices.png', optimal_thresholds=None):
     """Plot confusion matrices for each hallmark."""
     
     hallmark_names = {
@@ -197,8 +256,15 @@ def plot_confusion_matrices(predictions, targets, threshold=0.5, save_path='conf
         10: "Avoiding immune destruction"
     }
     
-    pred_binary = (predictions >= threshold).int().numpy()
     targets_np = targets.numpy()
+    
+    # Use optimal thresholds if provided, otherwise use default
+    if optimal_thresholds is not None:
+        pred_binary = np.zeros_like(predictions.numpy())
+        for i in range(11):
+            pred_binary[:, i] = (predictions[:, i].numpy() >= optimal_thresholds[i]).astype(int)
+    else:
+        pred_binary = (predictions >= threshold).int().numpy()
     
     fig, axes = plt.subplots(3, 4, figsize=(16, 12))
     axes = axes.flatten()
@@ -206,8 +272,14 @@ def plot_confusion_matrices(predictions, targets, threshold=0.5, save_path='conf
     for i in range(11):
         cm = confusion_matrix(targets_np[:, i], pred_binary[:, i])
         
+        # Add threshold info to title
+        if optimal_thresholds is not None:
+            title = f'{hallmark_names[i]}\n(threshold={optimal_thresholds[i]:.3f})'
+        else:
+            title = f'{hallmark_names[i]}\n(threshold={threshold:.3f})'
+        
         sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=axes[i])
-        axes[i].set_title(f'{hallmark_names[i]}', fontsize=10)
+        axes[i].set_title(title, fontsize=9)
         axes[i].set_xlabel('Predicted')
         axes[i].set_ylabel('Actual')
     
@@ -276,8 +348,67 @@ def main():
     # Save per-hallmark results
     hallmark_df.to_csv(output_dir / 'per_hallmark_performance.csv', index=False)
     
-    # Plot confusion matrices
-    plot_confusion_matrices(predictions, targets, save_path=output_dir / 'confusion_matrices.png')
+    # Find optimal thresholds
+    logger.info("\n" + "="*80)
+    logger.info("THRESHOLD OPTIMIZATION")
+    logger.info("="*80)
+    optimal_thresholds, threshold_df = find_optimal_thresholds(predictions, targets)
+    
+    # Print threshold analysis
+    for _, row in threshold_df.iterrows():
+        logger.info(f"{row['hallmark_name']:<40} "
+                   f"threshold={row['optimal_threshold']:.3f} "
+                   f"(F1: {row['default_f1']:.3f} -> {row['optimal_f1']:.3f}, "
+                   f"+{row['f1_improvement']:.3f})")
+    
+    # Save threshold analysis
+    threshold_df.to_csv(output_dir / 'threshold_analysis.csv', index=False)
+    
+    # Save optimal thresholds
+    with open(output_dir / 'optimal_thresholds.json', 'w') as f:
+        json.dump({
+            'thresholds': optimal_thresholds,
+            'hallmark_names': {
+                0: "Evading growth suppressors",
+                1: "Tumor promoting inflammation",
+                2: "Enabling replicative immortality",
+                3: "Cellular energetics",
+                4: "Resisting cell death",
+                5: "Activating invasion and metastasis",
+                6: "Genomic instability and mutation",
+                7: "None",
+                8: "Inducing angiogenesis",
+                9: "Sustaining proliferative signaling",
+                10: "Avoiding immune destruction"
+            }
+        }, f, indent=2)
+    
+    # Analyze performance with optimal thresholds
+    pred_binary_optimal = np.zeros_like(predictions.numpy())
+    for i in range(11):
+        pred_binary_optimal[:, i] = (predictions[:, i].numpy() >= optimal_thresholds[i]).astype(int)
+    
+    pred_binary_default = (predictions >= 0.5).int().numpy()
+    
+    f1_micro_optimal = f1_score(targets.numpy(), pred_binary_optimal, average='micro')
+    f1_macro_optimal = f1_score(targets.numpy(), pred_binary_optimal, average='macro')
+    f1_micro_default = f1_score(targets.numpy(), pred_binary_default, average='micro')
+    f1_macro_default = f1_score(targets.numpy(), pred_binary_default, average='macro')
+    
+    logger.info("\n" + "="*80)
+    logger.info("PERFORMANCE WITH OPTIMAL THRESHOLDS")
+    logger.info("="*80)
+    logger.info(f"Micro-F1: {f1_micro_default:.4f} -> {f1_micro_optimal:.4f} "
+               f"(+{f1_micro_optimal - f1_micro_default:.4f})")
+    logger.info(f"Macro-F1: {f1_macro_default:.4f} -> {f1_macro_optimal:.4f} "
+               f"(+{f1_macro_optimal - f1_macro_default:.4f})")
+    
+    # Plot confusion matrices with default thresholds
+    plot_confusion_matrices(predictions, targets, save_path=output_dir / 'confusion_matrices_default.png')
+    
+    # Plot confusion matrices with optimal thresholds
+    plot_confusion_matrices(predictions, targets, save_path=output_dir / 'confusion_matrices_optimal.png', 
+                          optimal_thresholds=optimal_thresholds)
     
     # Generate summary report
     report_path = output_dir / 'analysis_report.txt'
@@ -306,6 +437,19 @@ def main():
         f.write("-"*40 + "\n")
         bottom_hallmarks = hallmark_df.nsmallest(5, 'f1')
         f.write(bottom_hallmarks.to_string(index=False))
+        
+        f.write("\n\n\nTHRESHOLD OPTIMIZATION RESULTS\n")
+        f.write("="*40 + "\n")
+        f.write(f"Micro-F1: {f1_micro_default:.4f} -> {f1_micro_optimal:.4f} "
+               f"(+{f1_micro_optimal - f1_micro_default:.4f})\n")
+        f.write(f"Macro-F1: {f1_macro_default:.4f} -> {f1_macro_optimal:.4f} "
+               f"(+{f1_macro_optimal - f1_macro_default:.4f})\n")
+        
+        f.write("\n\nOPTIMAL THRESHOLDS BY HALLMARK\n")
+        f.write("-"*40 + "\n")
+        for _, row in threshold_df.iterrows():
+            f.write(f"{row['hallmark_name']:<40} {row['optimal_threshold']:.3f} "
+                   f"(F1: {row['default_f1']:.3f} -> {row['optimal_f1']:.3f})\n")
     
     logger.info(f"\nAnalysis complete! Results saved to {output_dir}")
     logger.info(f"Report available at: {report_path}")
