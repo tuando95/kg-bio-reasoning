@@ -202,14 +202,37 @@ class LearnedMechanisticInterpreter:
         sample_text = sample_data.get('text', '')
         
         # Get labels and ensure they're in the right format
-        labels = sample_data.get('labels', [])
-        if isinstance(labels, list):
-            labels = np.array(labels)
-        elif isinstance(labels, int):
-            # Single label - convert to multi-label format
+        labels = sample_data.get('labels', sample_data.get('label', []))
+        
+        # Handle different label formats
+        if isinstance(labels, list) and len(labels) > 0:
+            if isinstance(labels[0], (int, np.integer)):
+                # List of label indices (e.g., [7] or [0, 3])
+                temp = np.zeros(11)
+                for label_idx in labels:
+                    if 0 <= label_idx < 11:
+                        temp[label_idx] = 1
+                labels = temp
+            else:
+                # Already in binary format
+                labels = np.array(labels)
+        elif isinstance(labels, (int, np.integer)):
+            # Single label integer
             temp = np.zeros(11)
-            temp[labels] = 1
+            if 0 <= labels < 11:
+                temp[labels] = 1
             labels = temp
+        elif isinstance(labels, np.ndarray):
+            # Already an array
+            if labels.ndim == 0:
+                # Scalar array
+                temp = np.zeros(11)
+                if 0 <= int(labels) < 11:
+                    temp[int(labels)] = 1
+                labels = temp
+        else:
+            # Default to empty labels
+            labels = np.zeros(11)
         
         true_labels = np.where(labels == 1)[0].tolist()
         
@@ -714,7 +737,17 @@ class LearnedMechanisticInterpreter:
                 if sample_count >= num_samples:
                     break
                 
-                if sample_data.get('text', '') and len(sample_data['text']) > 10:
+                # Check if sample has text and non-None labels
+                sample_labels = sample_data.get('labels', sample_data.get('label', []))
+                has_non_none_label = True
+                
+                # Check if it's just the "None" label
+                if isinstance(sample_labels, list) and len(sample_labels) == 1 and sample_labels[0] == 7:
+                    has_non_none_label = False
+                elif isinstance(sample_labels, (int, np.integer)) and sample_labels == 7:
+                    has_non_none_label = False
+                
+                if sample_data.get('text', '') and len(sample_data['text']) > 10 and has_non_none_label:
                     logger.info(f"Analyzing sample {sample_count + 1}/{num_samples}")
                     
                     # Create sample directory
