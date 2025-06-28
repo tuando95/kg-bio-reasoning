@@ -150,10 +150,37 @@ class ComprehensiveAnalyzer:
                 batch_device[key] = value
         return batch_device
     
+    def _optimize_global_threshold(self, predictions: np.ndarray, targets: np.ndarray) -> float:
+        """Find single threshold that maximizes macro F1 across all classes."""
+        # Create a range of thresholds to test
+        thresholds_to_test = np.linspace(0.1, 0.9, 17)  # Test 0.1, 0.15, 0.2, ..., 0.9
+        
+        best_threshold = 0.5
+        best_macro_f1 = 0.0
+        
+        for threshold in thresholds_to_test:
+            pred_binary = (predictions >= threshold).astype(int)
+            macro_f1 = f1_score(targets, pred_binary, average='macro')
+            
+            if macro_f1 > best_macro_f1:
+                best_macro_f1 = macro_f1
+                best_threshold = threshold
+        
+        logger.info(f"Global optimal threshold: {best_threshold:.2f} (Macro-F1: {best_macro_f1:.4f})")
+        return best_threshold
+    
     def optimize_thresholds(self, predictions: np.ndarray, targets: np.ndarray) -> Dict:
-        """Find optimal thresholds for each hallmark using validation set."""
+        """Find optimal thresholds for each hallmark using validation set.
+        
+        Uses precision-recall curve for efficient threshold search.
+        Note: Optimizing on validation and evaluating on test may lead to
+        overfitting - consider using cross-validation for production.
+        """
         optimal_thresholds = {}
         threshold_details = []
+        
+        # Also try global threshold optimization
+        global_best_threshold = self._optimize_global_threshold(predictions, targets)
         
         for i in range(11):
             y_true = targets[:, i]
@@ -162,6 +189,16 @@ class ComprehensiveAnalyzer:
             # Skip if no positive samples
             if y_true.sum() == 0:
                 optimal_thresholds[i] = 0.5
+                threshold_details.append({
+                    'hallmark_id': i,
+                    'hallmark_name': self.hallmark_names[i],
+                    'optimal_threshold': 0.5,
+                    'optimal_f1': 0.0,
+                    'default_f1': 0.0,
+                    'f1_improvement': 0.0,
+                    'support': 0,
+                    'note': 'No positive samples'
+                })
                 continue
             
             # Calculate precision-recall curve
@@ -178,6 +215,9 @@ class ComprehensiveAnalyzer:
             # Calculate F1 at default threshold (0.5)
             default_f1 = f1_score(y_true, (y_scores >= 0.5).astype(int))
             
+            # Calculate F1 at global optimal threshold
+            global_f1 = f1_score(y_true, (y_scores >= global_best_threshold).astype(int))
+            
             optimal_thresholds[i] = float(best_threshold)
             
             threshold_details.append({
@@ -186,11 +226,12 @@ class ComprehensiveAnalyzer:
                 'optimal_threshold': float(best_threshold),
                 'optimal_f1': float(best_f1),
                 'default_f1': float(default_f1),
+                'global_threshold_f1': float(global_f1),
                 'f1_improvement': float(best_f1 - default_f1),
                 'support': int(y_true.sum())
             })
         
-        return optimal_thresholds, threshold_details
+        return optimal_thresholds, threshold_details, global_best_threshold
     
     def evaluate_with_thresholds(self, predictions: np.ndarray, targets: np.ndarray, 
                                 thresholds: Optional[Dict[int, float]] = None) -> Dict:
@@ -307,13 +348,16 @@ class ComprehensiveAnalyzer:
         
         # Optimize thresholds
         logger.info("Optimizing thresholds...")
-        optimal_thresholds, threshold_details = self.optimize_thresholds(val_predictions, val_targets)
+        optimal_thresholds, threshold_details, global_best_threshold = self.optimize_thresholds(val_predictions, val_targets)
         
         # Log threshold details
         logger.info("Threshold optimization details:")
+        logger.info(f"  Global optimal threshold: {global_best_threshold:.3f}")
         for detail in threshold_details[:5]:  # Show first 5 hallmarks
-            logger.info(f"  {detail['hallmark_name']}: threshold={detail['optimal_threshold']:.3f}, "
-                       f"val_f1={detail['optimal_f1']:.3f} (default={detail['default_f1']:.3f})")
+            logger.info(f"  {detail['hallmark_name']}: "
+                       f"per-class={detail['optimal_threshold']:.3f} (F1={detail['optimal_f1']:.3f}), "
+                       f"default=0.5 (F1={detail['default_f1']:.3f}), "
+                       f"global={global_best_threshold:.3f} (F1={detail['global_threshold_f1']:.3f})")
         
         # Get test set predictions
         logger.info("Evaluating on test set...")
