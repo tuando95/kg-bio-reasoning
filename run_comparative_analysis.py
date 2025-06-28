@@ -309,6 +309,12 @@ class ComprehensiveAnalyzer:
         logger.info("Optimizing thresholds...")
         optimal_thresholds, threshold_details = self.optimize_thresholds(val_predictions, val_targets)
         
+        # Log threshold details
+        logger.info("Threshold optimization details:")
+        for detail in threshold_details[:5]:  # Show first 5 hallmarks
+            logger.info(f"  {detail['hallmark_name']}: threshold={detail['optimal_threshold']:.3f}, "
+                       f"val_f1={detail['optimal_f1']:.3f} (default={detail['default_f1']:.3f})")
+        
         # Get test set predictions
         logger.info("Evaluating on test set...")
         test_loader = self.data_module.test_dataloader()
@@ -547,8 +553,11 @@ class ComprehensiveAnalyzer:
             f.write("-" * 40 + "\n")
             best_model = sorted_models[0][0]
             f.write(f"1. Best performing model: {best_model}\n")
-            f.write("2. Always use optimized thresholds for deployment\n")
+            f.write("2. Threshold optimization note: In some cases, optimal thresholds may perform\n")
+            f.write("   worse on test set due to overfitting to validation set distribution.\n")
+            f.write("   Consider using default thresholds (0.5) for more robust performance.\n")
             f.write("3. Consider ensemble methods for further improvement\n")
+            f.write("4. The high baseline performance suggests the cached KG features are very informative\n")
         
         logger.info("Comprehensive report generated")
 
@@ -618,10 +627,28 @@ def main():
             'improvement': results['improvement']
         }
     
+    # Convert numpy types to Python native types for JSON serialization
+    def convert_numpy_types(obj):
+        """Recursively convert numpy types in nested structures."""
+        if isinstance(obj, dict):
+            return {k: convert_numpy_types(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [convert_numpy_types(v) for v in obj]
+        elif isinstance(obj, (np.integer, np.int_)):
+            return int(obj)
+        elif isinstance(obj, (np.floating, np.float_)):
+            return float(obj)
+        elif isinstance(obj, (np.bool_, np.bool8)):
+            return bool(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        else:
+            return obj
+    
     with open(output_dir / 'results.json', 'w') as f:
         json.dump({
-            'model_results': results_to_save,
-            'mcnemar_tests': mcnemar_results
+            'model_results': convert_numpy_types(results_to_save),
+            'mcnemar_tests': convert_numpy_types(mcnemar_results)
         }, f, indent=2)
     
     # Save detailed classification results for each model

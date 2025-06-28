@@ -511,14 +511,26 @@ class ExperimentRunner:
             f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write("=" * 80 + "\n\n")
             
+            # Check if we have results
+            if df.empty:
+                f.write("No experiment results found.\n")
+                logger.warning("No experiment results to report")
+                return
+            
+            # Log available columns for debugging
+            logger.info(f"Available columns in results: {df.columns.tolist()}")
+            
             # Best performing model
-            if 'f1_macro' in df.columns:
+            if 'f1_macro' in df.columns and not df['f1_macro'].isna().all():
                 best_idx = df['f1_macro'].idxmax()
                 best_model = df.loc[best_idx]
                 
                 f.write("BEST PERFORMING MODEL\n")
                 f.write("-" * 40 + "\n")
-                f.write(f"Experiment: {best_model['experiment_name']}\n")
+                
+                # Get experiment name safely
+                exp_name = best_model.get('experiment_name', 'Unknown')
+                f.write(f"Experiment: {exp_name}\n")
                 f.write(f"F1-Macro: {best_model['f1_macro']:.4f}\n")
                 f.write(f"F1-Micro: {best_model.get('f1_micro', 0):.4f}\n")
                 
@@ -530,24 +542,35 @@ class ExperimentRunner:
                            f"(+{best_model['f1_micro_optimal'] - best_model.get('f1_micro', 0):.4f})\n")
                 f.write(f"Modifications: {best_model.get('modifications', {})}\n\n")
             
-            # Ablation analysis
-            f.write("ABLATION STUDY RESULTS\n")
-            f.write("-" * 40 + "\n")
-            
-            ablation_results = df[df['experiment_name'].str.contains('ablation')]
-            if not ablation_results.empty:
-                ablation_summary = ablation_results.groupby(
-                    ablation_results['experiment_name'].str.split('_').str[1]
-                )['f1_macro'].agg(['mean', 'std', 'max'])
-                f.write(ablation_summary.to_string())
-                f.write("\n\n")
+            # Ablation analysis - only if experiment_name column exists
+            if 'experiment_name' in df.columns:
+                f.write("ABLATION STUDY RESULTS\n")
+                f.write("-" * 40 + "\n")
+                
+                ablation_results = df[df['experiment_name'].str.contains('ablation', na=False)]
+                if not ablation_results.empty:
+                    ablation_summary = ablation_results.groupby(
+                        ablation_results['experiment_name'].str.split('_').str[1]
+                    )['f1_macro'].agg(['mean', 'std', 'max'])
+                    f.write(ablation_summary.to_string())
+                    f.write("\n\n")
+                else:
+                    f.write("No ablation study results found.\n\n")
             
             # All results summary
             f.write("ALL EXPERIMENT RESULTS\n")
             f.write("-" * 40 + "\n")
-            summary_cols = ['experiment_name', 'f1_macro', 'f1_micro', 'hamming_loss']
+            
+            # Only include columns that actually exist
+            summary_cols = ['experiment_name', 'f1_macro', 'f1_micro', 'hamming_loss', 
+                          'f1_macro_optimal', 'f1_micro_optimal', 'status']
             available_cols = [col for col in summary_cols if col in df.columns]
-            f.write(df[available_cols].to_string(index=False))
+            
+            if available_cols:
+                f.write(df[available_cols].to_string(index=False))
+            else:
+                f.write("No standard metrics columns found in results.\n")
+                f.write(f"Available columns: {', '.join(df.columns)}\n")
         
         logger.info(f"Report saved to {report_path}")
 
