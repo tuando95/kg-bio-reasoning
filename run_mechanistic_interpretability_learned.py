@@ -277,9 +277,6 @@ class LearnedMechanisticInterpreter:
         self._visualize_learned_pathway_activation(
             pathway_activation, predictions, true_labels, save_dir
         )
-        self._visualize_molecular_network(
-            knowledge_graph, entities, predictions, save_dir
-        )
         self._visualize_learned_gene_contributions(
             gene_contributions, save_dir
         )
