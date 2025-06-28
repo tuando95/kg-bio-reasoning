@@ -180,8 +180,10 @@ class Trainer:
                 break
             
             # Save checkpoint
-            if val_metrics[self.early_stopping_metric] > self.best_metric:
-                self.best_metric = val_metrics[self.early_stopping_metric]
+            metric_key = self._get_metric_key()
+            
+            if val_metrics[metric_key] > self.best_metric:
+                self.best_metric = val_metrics[metric_key]
                 self._save_checkpoint(epoch, val_metrics, is_best=True)
             else:
                 self._save_checkpoint(epoch, val_metrics, is_best=False)
@@ -371,13 +373,16 @@ class Trainer:
         
         return moved_batch
     
-    def _check_early_stopping(self, val_metrics: Dict[str, float]) -> bool:
-        """Check early stopping criteria."""
-        # Remove 'val_' prefix if present in the metric name
+    def _get_metric_key(self) -> str:
+        """Get the metric key without 'val_' prefix."""
         metric_key = self.early_stopping_metric
         if metric_key.startswith('val_'):
             metric_key = metric_key[4:]  # Remove 'val_' prefix
-        
+        return metric_key
+    
+    def _check_early_stopping(self, val_metrics: Dict[str, float]) -> bool:
+        """Check early stopping criteria."""
+        metric_key = self._get_metric_key()
         current_metric = val_metrics[metric_key]
         
         if current_metric - self.best_metric > self.early_stopping_min_delta:
@@ -407,7 +412,8 @@ class Trainer:
         if is_best:
             best_path = self.checkpoint_dir / 'best.pt'
             torch.save(checkpoint, best_path)
-            logger.info(f"Saved best checkpoint with {self.early_stopping_metric}: {metrics[self.early_stopping_metric]:.4f}")
+            metric_key = self._get_metric_key()
+            logger.info(f"Saved best checkpoint with {self.early_stopping_metric}: {metrics[metric_key]:.4f}")
     
     def _load_checkpoint(self, checkpoint_name: str):
         """Load model checkpoint."""
