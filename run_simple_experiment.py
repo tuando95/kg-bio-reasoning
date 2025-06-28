@@ -29,7 +29,7 @@ def run_simple_baseline():
     
     # Modify for baseline experiment (BioBERT only)
     config['experiment']['name'] = 'simple_baseline_test'
-    config['training']['batch_size'] = 64  # Larger batch size for better GPU utilization
+    config['training']['batch_size'] = 36 # Larger batch size for better GPU utilization
     config['training']['max_epochs'] = 1  # Just 1 epoch for testing
     
     # Add some training settings
@@ -130,7 +130,7 @@ def run_kg_enabled_experiment():
     
     # Modify for KG experiment
     config['experiment']['name'] = 'simple_kg_test'
-    config['training']['batch_size'] = 4  # Smaller batch due to KG overhead
+    config['training']['batch_size'] = 16  # Smaller batch due to KG overhead
     config['training']['max_epochs'] = 2
     
     # Turn off AMP
