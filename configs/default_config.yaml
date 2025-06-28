@@ -16,7 +16,7 @@ model:
   
   # Biological Attention Configuration
   bio_attention:
-    num_heads: 8
+    num_heads: 4
     fusion_strategy: "learned"  # Options: learned, fixed, adaptive
     fusion_weight: 0.5  # Initial lambda value (for attention fusion)
     pathway_relevance_dim: 256
@@ -79,7 +79,7 @@ knowledge_graph:
 # Training Configuration
 training:
   batch_size: 16
-  max_epochs: 10
+  max_epochs: 30
   learning_rate: 2e-5
   warmup_steps: 500
   gradient_accumulation_steps: 2
@@ -100,8 +100,8 @@ training:
   # Multi-Task Loss Weights
   loss_weights:
     hallmark_loss: 1.0
-    pathway_loss: 0.25  # alpha
-    consistency_loss: 0.1  # beta
+    pathway_loss: 0.1  # alpha
+    consistency_loss: 0.05  # beta
     
   # Early Stopping
   early_stopping:
