@@ -212,6 +212,13 @@ class ComprehensiveAnalyzer:
             best_threshold = thresholds[best_idx] if best_idx < len(thresholds) else 0.5
             best_f1 = f1_scores[best_idx]
             
+            # Apply conservative adjustment to prevent extreme thresholds
+            # This helps prevent overfitting to validation set
+            if best_threshold > 0.8:
+                best_threshold = 0.8
+            elif best_threshold < 0.2:
+                best_threshold = 0.2
+            
             # Calculate F1 at default threshold (0.5)
             default_f1 = f1_score(y_true, (y_scores >= 0.5).astype(int))
             
@@ -351,13 +358,23 @@ class ComprehensiveAnalyzer:
         optimal_thresholds, threshold_details, global_best_threshold = self.optimize_thresholds(val_predictions, val_targets)
         
         # Log threshold details
-        logger.info("Threshold optimization details:")
+        logger.info("Threshold optimization details (on validation set):")
         logger.info(f"  Global optimal threshold: {global_best_threshold:.3f}")
-        for detail in threshold_details[:5]:  # Show first 5 hallmarks
+        
+        # Show statistics about threshold distribution
+        per_class_thresholds = [optimal_thresholds[i] for i in range(11)]
+        logger.info(f"  Per-class threshold stats: mean={np.mean(per_class_thresholds):.3f}, "
+                   f"std={np.std(per_class_thresholds):.3f}, "
+                   f"min={np.min(per_class_thresholds):.3f}, max={np.max(per_class_thresholds):.3f}")
+        
+        # Show details for problematic classes (0 and 10) and some others
+        important_classes = [0, 1, 4, 9, 10]  # Include low-performing and high-performing
+        for i in important_classes:
+            detail = threshold_details[i]
             logger.info(f"  {detail['hallmark_name']}: "
-                       f"per-class={detail['optimal_threshold']:.3f} (F1={detail['optimal_f1']:.3f}), "
+                       f"threshold={detail['optimal_threshold']:.3f} (F1={detail['optimal_f1']:.3f}), "
                        f"default=0.5 (F1={detail['default_f1']:.3f}), "
-                       f"global={global_best_threshold:.3f} (F1={detail['global_threshold_f1']:.3f})")
+                       f"support={detail['support']}")
         
         # Get test set predictions
         logger.info("Evaluating on test set...")
@@ -367,6 +384,16 @@ class ComprehensiveAnalyzer:
         # Evaluate with default and optimal thresholds
         results_default = self.evaluate_with_thresholds(test_predictions, test_targets, None)
         results_optimal = self.evaluate_with_thresholds(test_predictions, test_targets, optimal_thresholds)
+        
+        # Also evaluate with global threshold
+        global_thresholds = {i: global_best_threshold for i in range(11)}
+        results_global = self.evaluate_with_thresholds(test_predictions, test_targets, global_thresholds)
+        
+        # Log comparison
+        logger.info(f"  Test evaluation comparison:")
+        logger.info(f"    Default (0.5): Macro-F1={results_default['f1_macro']:.4f}, Micro-F1={results_default['f1_micro']:.4f}")
+        logger.info(f"    Global optimal: Macro-F1={results_global['f1_macro']:.4f}, Micro-F1={results_global['f1_micro']:.4f}")
+        logger.info(f"    Per-class optimal: Macro-F1={results_optimal['f1_macro']:.4f}, Micro-F1={results_optimal['f1_micro']:.4f}")
         
         # Compile results
         results = {
