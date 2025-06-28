@@ -27,7 +27,7 @@ model:
   fusion:
     strategy: "late"  # Options: early, late, cross_modal
     text_dim: 768
-    graph_dim: 512
+    graph_dim: 768  # Match text dimension after projection
     fusion_dim: 1024
 
 # Knowledge Graph Configuration
