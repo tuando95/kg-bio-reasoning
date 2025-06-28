@@ -51,7 +51,23 @@ def load_model_and_config(checkpoint_path: str, config_path: str = 'configs/defa
     
     # Initialize model
     model_config = config['model'].copy()
-    model_config['loss_weights'] = config['training']['loss_weights']
+    
+    # Check if checkpoint has auxiliary components
+    state_dict_keys = checkpoint['model_state_dict'].keys()
+    has_pathway_classifier = any('pathway_classifier' in key for key in state_dict_keys)
+    has_consistency_predictor = any('consistency_predictor' in key for key in state_dict_keys)
+    
+    # Set loss weights based on what's in the checkpoint
+    if has_pathway_classifier and has_consistency_predictor:
+        model_config['loss_weights'] = config['training']['loss_weights']
+    else:
+        # Disable auxiliary tasks if not in checkpoint
+        model_config['loss_weights'] = {
+            'hallmark_loss': 1.0,
+            'pathway_loss': 0.0,
+            'consistency_loss': 0.0
+        }
+    
     model = BioKGBioBERT(model_config)
     
     # Load state dict
