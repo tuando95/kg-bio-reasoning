@@ -80,22 +80,23 @@ class ExperimentRunner:
         
         baseline_configs = [
             # BioBERT baseline (no KG, no bio attention)
-            self._create_config(
-                "baseline_biobert",
-                {
-                    'model.use_knowledge_graph': False,
-                    'model.use_bio_attention': False,
-                    'training.loss_weights.pathway_loss': 0.0,
-                    'training.loss_weights.consistency_loss': 0.0
-                }
-            ),
+            #self._create_config(
+            #    "baseline_biobert",
+            #    {
+            #        'model.use_knowledge_graph': False,
+            #        'model.use_bio_attention': False,
+            #        'training.loss_weights.pathway_loss': 0.0,
+            #        'training.loss_weights.consistency_loss': 0.0
+            #    }
+            #),
             
-            # BioBERT + Entity features
+            # BioBERT + Entity features (entity embeddings but no KG)
             self._create_config(
-                "baseline_biobert_entities",
+                "baseline_biobert_entities", 
                 {
                     'model.use_knowledge_graph': False,
                     'model.use_bio_attention': False,
+                    'model.use_entity_features': True,  # This enables entity-aware embeddings
                     'training.loss_weights.pathway_loss': 0.0,
                     'training.loss_weights.consistency_loss': 0.0
                 }
