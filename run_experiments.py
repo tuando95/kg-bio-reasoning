@@ -26,6 +26,10 @@ from tqdm import tqdm
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from src.train import train_model
+from src.models.biokg_biobert import BioKGBioBERT
+from src.data.dataset import HoCDataModule
+from src.evaluation import Evaluator
+from sklearn.metrics import f1_score, precision_recall_curve
 
 # Setup logging
 logging.basicConfig(
@@ -79,8 +83,8 @@ class ExperimentRunner:
             self._create_config(
                 "baseline_biobert",
                 {
-                    'knowledge_graph.enabled': False,
-                    'model.bio_attention.enabled': False,
+                    'model.use_knowledge_graph': False,
+                    'model.use_bio_attention': False,
                     'training.loss_weights.pathway_loss': 0.0,
                     'training.loss_weights.consistency_loss': 0.0
                 }
@@ -90,8 +94,8 @@ class ExperimentRunner:
             self._create_config(
                 "baseline_biobert_entities",
                 {
-                    'knowledge_graph.enabled': False,
-                    'model.bio_attention.enabled': False,
+                    'model.use_knowledge_graph': False,
+                    'model.use_bio_attention': False,
                     'training.loss_weights.pathway_loss': 0.0,
                     'training.loss_weights.consistency_loss': 0.0
                 }
@@ -101,8 +105,8 @@ class ExperimentRunner:
             self._create_config(
                 "baseline_biobert_simple_kg",
                 {
-                    'knowledge_graph.enabled': True,
-                    'model.bio_attention.enabled': False,
+                    'model.use_knowledge_graph': True,
+                    'model.use_bio_attention': False,
                     'training.loss_weights.pathway_loss': 0.0,
                     'training.loss_weights.consistency_loss': 0.0
                 }
@@ -125,20 +129,20 @@ class ExperimentRunner:
             self._create_config(
                 "ablation_attention_full",
                 {
-                    'model.bio_attention.enabled': True,
+                    'model.use_bio_attention': True,
                     'model.bio_attention.use_pathways': True
                 }
             ),
             self._create_config(
                 "ablation_attention_none",
                 {
-                    'model.bio_attention.enabled': False
+                    'model.use_bio_attention': False
                 }
             ),
             self._create_config(
                 "ablation_attention_entity_only",
                 {
-                    'model.bio_attention.enabled': True,
+                    'model.use_bio_attention': True,
                     'model.bio_attention.use_pathways': False
                 }
             )
@@ -150,20 +154,20 @@ class ExperimentRunner:
             self._create_config(
                 "ablation_kg_none",
                 {
-                    'knowledge_graph.enabled': False
+                    'model.use_knowledge_graph': False
                 }
             ),
             self._create_config(
                 "ablation_kg_1hop",
                 {
-                    'knowledge_graph.enabled': True,
+                    'model.use_knowledge_graph': True,
                     'knowledge_graph.graph_construction.max_hops': 1
                 }
             ),
             self._create_config(
                 "ablation_kg_2hop",
                 {
-                    'knowledge_graph.enabled': True,
+                    'model.use_knowledge_graph': True,
                     'knowledge_graph.graph_construction.max_hops': 2
                 }
             )
@@ -265,6 +269,39 @@ class ExperimentRunner:
                 )
             )
         
+        # Learning rate search
+        for lr in search_space['learning_rate']:
+            hyperparam_configs.append(
+                self._create_config(
+                    f"hyperparam_lr_{lr}",
+                    {
+                        'training.learning_rate': lr
+                    }
+                )
+            )
+        
+        # Batch size search
+        for batch_size in search_space['batch_size']:
+            hyperparam_configs.append(
+                self._create_config(
+                    f"hyperparam_batch_{batch_size}",
+                    {
+                        'training.batch_size': batch_size
+                    }
+                )
+            )
+        
+        # Dropout rate search
+        for dropout in search_space['dropout_rate']:
+            hyperparam_configs.append(
+                self._create_config(
+                    f"hyperparam_dropout_{dropout}",
+                    {
+                        'model.dropout_rate': dropout
+                    }
+                )
+            )
+        
         # Run hyperparameter experiments
         for config in tqdm(hyperparam_configs, desc="Hyperparameter search"):
             result = self._run_single_experiment(config)
@@ -335,6 +372,85 @@ class ExperimentRunner:
             d = d[key]
         d[keys[-1]] = value
     
+    def _optimize_thresholds(self, checkpoint_path: Path, config: Dict) -> Dict[str, float]:
+        """Optimize classification thresholds on validation set."""
+        device = torch.device(config['experiment']['device'])
+        
+        # Load checkpoint
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+        
+        # Initialize model
+        model_config = config['model'].copy()
+        model_config['loss_weights'] = config['training']['loss_weights']
+        model = BioKGBioBERT(model_config)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model.eval()
+        model.to(device)
+        
+        # Get validation predictions
+        data_module = HoCDataModule(config)
+        data_module.setup()
+        val_loader = data_module.val_dataloader()
+        
+        all_predictions = []
+        all_targets = []
+        
+        with torch.no_grad():
+            for batch in val_loader:
+                # Move batch to device
+                batch_device = {}
+                for key, value in batch.items():
+                    if isinstance(value, torch.Tensor):
+                        batch_device[key] = value.to(device)
+                    elif key == 'graph_data':
+                        batch_device[key] = value.to(device) if value is not None else None
+                    elif key == 'biological_context':
+                        moved_context = {}
+                        for ctx_key, ctx_value in value.items():
+                            if isinstance(ctx_value, torch.Tensor):
+                                moved_context[ctx_key] = ctx_value.to(device)
+                            else:
+                                moved_context[ctx_key] = ctx_value
+                        batch_device[key] = moved_context
+                    else:
+                        batch_device[key] = value
+                
+                outputs = model(**batch_device)
+                predictions = torch.sigmoid(outputs['logits'])
+                all_predictions.append(predictions.cpu())
+                all_targets.append(batch_device['labels'].cpu())
+        
+        all_predictions = torch.cat(all_predictions, dim=0)
+        all_targets = torch.cat(all_targets, dim=0)
+        
+        # Find optimal thresholds
+        optimal_thresholds = {}
+        for i in range(11):
+            y_true = all_targets[:, i].numpy()
+            y_scores = all_predictions[:, i].numpy()
+            
+            if y_true.sum() == 0:
+                optimal_thresholds[i] = 0.5
+                continue
+            
+            precisions, recalls, thresholds = precision_recall_curve(y_true, y_scores)
+            f1_scores = 2 * (precisions * recalls) / (precisions + recalls + 1e-8)
+            best_idx = np.argmax(f1_scores)
+            optimal_thresholds[i] = float(thresholds[best_idx] if best_idx < len(thresholds) else 0.5)
+        
+        # Calculate performance with optimal thresholds
+        pred_optimal = np.zeros_like(all_predictions.numpy())
+        for i in range(11):
+            pred_optimal[:, i] = (all_predictions[:, i].numpy() >= optimal_thresholds[i]).astype(int)
+        
+        pred_default = (all_predictions >= 0.5).float().numpy()
+        
+        return {
+            'f1_micro_optimal': f1_score(all_targets.numpy(), pred_optimal, average='micro'),
+            'f1_macro_optimal': f1_score(all_targets.numpy(), pred_optimal, average='macro'),
+            'optimal_thresholds': optimal_thresholds
+        }
+    
     def _run_single_experiment(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Run a single experiment."""
         experiment_name = config['experiment']['name']
@@ -349,6 +465,15 @@ class ExperimentRunner:
             # Run training
             results = train_model(config)
             
+            # Add threshold optimization results if available
+            checkpoint_dir = Path(config['experiment']['checkpoint_dir']) / config['experiment']['name']
+            best_checkpoint = checkpoint_dir / 'best.pt'
+            
+            if best_checkpoint.exists() and config.get('optimize_thresholds', True):
+                logger.info(f"Running threshold optimization for {experiment_name}...")
+                threshold_results = self._optimize_thresholds(best_checkpoint, config)
+                results.update(threshold_results)
+            
             # Add metadata
             results['experiment_name'] = experiment_name
             results['config_path'] = str(config_path)
@@ -359,7 +484,11 @@ class ExperimentRunner:
             with open(results_path, 'w') as f:
                 json.dump(results, f, indent=2)
             
-            logger.info(f"Completed {experiment_name}: F1-Macro={results.get('f1_macro', 0):.4f}")
+            if 'f1_macro_optimal' in results:
+                logger.info(f"Completed {experiment_name}: F1-Macro={results.get('f1_macro', 0):.4f} "
+                           f"(Optimal: {results.get('f1_macro_optimal', 0):.4f})")
+            else:
+                logger.info(f"Completed {experiment_name}: F1-Macro={results.get('f1_macro', 0):.4f}")
             
             return results
             
@@ -400,6 +529,13 @@ class ExperimentRunner:
                 f.write(f"Experiment: {best_model['experiment_name']}\n")
                 f.write(f"F1-Macro: {best_model['f1_macro']:.4f}\n")
                 f.write(f"F1-Micro: {best_model.get('f1_micro', 0):.4f}\n")
+                
+                if 'f1_macro_optimal' in best_model:
+                    f.write(f"\nWith Optimal Thresholds:\n")
+                    f.write(f"F1-Macro: {best_model['f1_macro_optimal']:.4f} "
+                           f"(+{best_model['f1_macro_optimal'] - best_model['f1_macro']:.4f})\n")
+                    f.write(f"F1-Micro: {best_model['f1_micro_optimal']:.4f} "
+                           f"(+{best_model['f1_micro_optimal'] - best_model.get('f1_micro', 0):.4f})\n")
                 f.write(f"Modifications: {best_model.get('modifications', {})}\n\n")
             
             # Ablation analysis

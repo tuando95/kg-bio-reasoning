@@ -73,7 +73,7 @@ knowledge_graph:
 # Training Configuration
 training:
   batch_size: 16
-  max_epochs: 50
+  max_epochs: 10
   learning_rate: 2e-5
   warmup_steps: 500
   gradient_accumulation_steps: 2
@@ -199,20 +199,6 @@ ablation_studies:
       pathway_loss: true
       consistency_loss: true
 
-# Hyperparameter Search
-hyperparameter_search:
-  enabled: false
-  method: "grid"  # Options: grid, random, bayesian
-  
-  # Search Space
-  search_space:
-    fusion_weight: [0.1, 0.3, 0.5, 0.7, 0.9]
-    pathway_loss_weight: [0.1, 0.25, 0.5, 1.0]
-    consistency_loss_weight: [0.05, 0.1, 0.2, 0.5]
-    gnn_layers: [1, 2, 3, 4]
-    gnn_heads: [4, 8, 12, 16]
-    graph_embedding_dim: [256, 512, 768]
-
 # Experiment Settings
 experiment:
   name: "biokg_biobert_hoc"
@@ -242,3 +228,32 @@ logging:
     enabled: false
     project: "biokg-biobert"
     entity: "your-entity"
+
+# Hyperparameter Search Configuration
+hyperparameter_search:
+  enabled: true
+  method: "grid"  # Options: grid, random, bayesian
+  search_space:
+    # Learning rate search
+    learning_rate: [1e-5, 2e-5, 3e-5, 5e-5]
+    
+    # Batch size search
+    batch_size: [8, 16]
+    
+    # Fusion weight (lambda) for biological attention
+    fusion_weight: [0.1, 0.3, 0.5, 0.7, 0.9]
+    
+    # Multi-task loss weights
+    pathway_loss_weight: [0.0, 0.1, 0.25, 0.5]
+    consistency_loss_weight: [0.0, 0.05, 0.1, 0.2]
+    
+    # GNN architecture
+    gnn_layers: [2, 3, 4]
+    gnn_heads: [4, 8]  # Removed 2 as it's too few for attention
+    # gnn_hidden_dim is fixed at 512 in the model config
+    
+    # Dropout rates
+    dropout_rate: [0.1, 0.2, 0.3]
+    
+    # Number of biological attention layers
+    num_bio_attention_layers: [1, 2, 3]
