@@ -53,6 +53,7 @@ class BioKGBioBERT(nn.Module):
         # Model components based on configuration
         self.use_kg = config.get('use_knowledge_graph', True)
         self.use_bio_attention = config.get('use_bio_attention', True)
+        self.use_entity_features = config.get('use_entity_features', True)
         
         # Text encoder with entity awareness
         self.text_encoder = BioBERTEntityAware(config)
@@ -201,9 +202,9 @@ class BioKGBioBERT(nn.Module):
         text_output = self.text_encoder(
             input_ids=input_ids,
             attention_mask=attention_mask,
-            entity_mapping=entity_mapping,
-            entity_types=entity_types,
-            entity_confidences=entity_confidences,
+            entity_mapping=entity_mapping if self.use_entity_features else None,
+            entity_types=entity_types if self.use_entity_features else None,
+            entity_confidences=entity_confidences if self.use_entity_features else None,
             return_entity_embeddings=True
         )
         

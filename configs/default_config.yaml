@@ -10,6 +10,7 @@ model:
   # Model component flags
   use_knowledge_graph: true
   use_bio_attention: true
+  use_entity_features: true  # Whether to use entity-aware embeddings
   num_bio_attention_layers: 2
   num_pathways: 50  # Number of pathways for auxiliary task
   
