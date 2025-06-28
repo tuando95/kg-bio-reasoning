@@ -82,7 +82,7 @@ class BioKGBioBERT(nn.Module):
         fusion_config = config.get('fusion', {
             'strategy': 'late',
             'text_dim': 768,
-            'graph_dim': 512,
+            'graph_dim': 768,  # Match text dimension after graph encoder projection
             'fusion_dim': 1024
         })
         self.fusion_strategy = fusion_config.get('strategy', 'late')
