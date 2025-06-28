@@ -129,13 +129,6 @@ class ExperimentRunner:
         logger.info("Generating attention mechanism ablations...")
         ablation_configs.extend([
             self._create_config(
-                "ablation_attention_full",
-                {
-                    'model.use_bio_attention': True,
-                    'model.bio_attention.use_pathways': True
-                }
-            ),
-            self._create_config(
                 "ablation_attention_none",
                 {
                     'model.use_bio_attention': False
@@ -165,13 +158,6 @@ class ExperimentRunner:
                     'model.use_knowledge_graph': True,
                     'knowledge_graph.graph_construction.max_hops': 1
                 }
-            ),
-            self._create_config(
-                "ablation_kg_2hop",
-                {
-                    'model.use_knowledge_graph': True,
-                    'knowledge_graph.graph_construction.max_hops': 2
-                }
             )
         ])
         
@@ -200,7 +186,7 @@ class ExperimentRunner:
             self._create_config(
                 "ablation_multitask_with_pathway",
                 {
-                    'training.loss_weights.pathway_loss': 0.25,
+                    'training.loss_weights.pathway_loss': 0.1,
                     'training.loss_weights.consistency_loss': 0.0
                 }
             ),
@@ -208,14 +194,7 @@ class ExperimentRunner:
                 "ablation_multitask_with_consistency",
                 {
                     'training.loss_weights.pathway_loss': 0.0,
-                    'training.loss_weights.consistency_loss': 0.1
-                }
-            ),
-            self._create_config(
-                "ablation_multitask_full",
-                {
-                    'training.loss_weights.pathway_loss': 0.25,
-                    'training.loss_weights.consistency_loss': 0.1
+                    'training.loss_weights.consistency_loss': 0.05
                 }
             )
         ])
