@@ -209,10 +209,25 @@ class Evaluator:
         
         metrics['bio_synergy_capture_rate'] = synergy_correct / max(total_synergy, 1)
         
+        # Calculate random baseline for comparison
+        # Random model would predict each hallmark with ~0.5 probability
+        # So co-occurrence would be ~0.25 for any pair
+        metrics['bio_synergy_capture_rate_random_baseline'] = 0.25
+        metrics['bio_synergy_capture_rate_improvement'] = (
+            metrics['bio_synergy_capture_rate'] - 0.25
+        )
+        
         # Overall biological plausibility score
         metrics['bio_plausibility_score'] = (
             (1 - metrics['bio_incompatible_violation_rate']) * 0.7 +
             metrics['bio_synergy_capture_rate'] * 0.3
+        )
+        
+        # Add baseline comparisons for plausibility
+        # Random model: ~50% avoiding violations * 0.7 + 25% synergy * 0.3 = 0.425
+        metrics['bio_plausibility_score_random_baseline'] = 0.425
+        metrics['bio_plausibility_score_improvement'] = (
+            metrics['bio_plausibility_score'] - 0.425
         )
         
         return metrics

@@ -18,7 +18,7 @@ model:
   bio_attention:
     num_heads: 8
     fusion_strategy: "learned"  # Options: learned, fixed, adaptive
-    fusion_weight: 0.5  # Initial lambda value
+    fusion_weight: 0.5  # Initial lambda value (for attention fusion)
     pathway_relevance_dim: 256
     
   # Graph Neural Network Configuration
@@ -29,6 +29,8 @@ model:
     num_heads: 4
     dropout: 0.1
     residual: true
+    readout_type: "mean_max"  # Options: mean, max, mean_max, attention
+    input_dim: 768  # BioBERT dimension
     
   # Multi-Modal Fusion
   fusion:
@@ -36,6 +38,9 @@ model:
     text_dim: 768
     graph_dim: 768  # Match text dimension after projection
     fusion_dim: 1024
+    
+  # Entity-aware encoding
+  entity_pooling: "mean"  # Options: mean, max, first
 
 # Knowledge Graph Configuration
 knowledge_graph:
@@ -111,6 +116,8 @@ dataset:
   val_split: "validation"
   test_split: "test"
   max_seq_length: 512
+  use_cached_dataset: true  # Whether to use pre-built cached dataset
+  cache_dir: "cache/kg_preprocessed"  # Directory for cached datasets
   
   # Data Augmentation
   augmentation:
@@ -209,6 +216,7 @@ experiment:
   checkpoint_dir: "checkpoints"
   log_dir: "logs"
   results_dir: "results"
+  optimize_thresholds: true  # Whether to optimize classification thresholds
   
   # Hardware
   device: "cuda"
@@ -232,7 +240,7 @@ logging:
 
 # Hyperparameter Search Configuration
 hyperparameter_search:
-  enabled: true
+  enabled: false  # Disabled for KDD submission
   method: "grid"  # Options: grid, random, bayesian
   search_space:
     # Learning rate search

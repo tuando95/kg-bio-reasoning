@@ -309,43 +309,33 @@ class ExperimentRunner:
             result = self._run_single_experiment(config)
             self.results.append(result)
     
-    def run_final_model(self, num_seeds: int = 5):
-        """Run final model with multiple seeds for statistical significance."""
-        logger.info(f"Running final model with {num_seeds} seeds...")
+    def run_final_model(self, num_seeds: int = 1):
+        """Run final model with full configuration."""
+        logger.info(f"Running final model...")
         
-        final_results = []
+        # Use base config as-is (with all features enabled)
+        config = copy.deepcopy(self.base_config)
+        config['experiment']['name'] = "final_model_full"
         
-        for seed in range(num_seeds):
-            config = copy.deepcopy(self.base_config)
-            config['experiment']['seed'] = 42 + seed
-            config['experiment']['name'] = f"final_model_seed_{42 + seed}"
-            
-            result = self._run_single_experiment(config)
-            final_results.append(result)
-        
-        # Compute statistics
-        metrics = ['val_f1_macro', 'val_f1_micro', 'test_f1_macro', 'test_f1_micro']
-        stats = {}
-        
-        for metric in metrics:
-            values = [r.get(metric, 0) for r in final_results if metric in r]
-            if values:
-                stats[f"{metric}_mean"] = np.mean(values)
-                stats[f"{metric}_std"] = np.std(values)
+        # Run single experiment with full features
+        result = self._run_single_experiment(config)
         
         # Save final results
         final_report = {
-            'num_seeds': num_seeds,
-            'individual_results': final_results,
-            'statistics': stats
+            'configuration': 'Full BioKG-BioBERT with all features',
+            'result': result
         }
         
         with open(self.experiment_dir / 'final_model_results.json', 'w') as f:
             json.dump(final_report, f, indent=2)
         
         logger.info(f"Final model results:")
-        logger.info(f"  Test F1-Macro: {stats.get('test_f1_macro_mean', 0):.4f} ± {stats.get('test_f1_macro_std', 0):.4f}")
-        logger.info(f"  Test F1-Micro: {stats.get('test_f1_micro_mean', 0):.4f} ± {stats.get('test_f1_micro_std', 0):.4f}")
+        logger.info(f"  Test F1-Macro: {result.get('test_f1_macro', result.get('f1_macro', 0)):.4f}")
+        logger.info(f"  Test F1-Micro: {result.get('test_f1_micro', result.get('f1_micro', 0)):.4f}")
+        
+        if 'f1_macro_optimal' in result:
+            logger.info(f"  Test F1-Macro (optimal thresholds): {result.get('f1_macro_optimal', 0):.4f}")
+            logger.info(f"  Test F1-Micro (optimal thresholds): {result.get('f1_micro_optimal', 0):.4f}")
     
     def _create_config(self, name: str, modifications: Dict[str, Any]) -> Dict[str, Any]:
         """Create modified configuration."""
@@ -576,7 +566,7 @@ def main():
                        help='Run hyperparameter search')
     parser.add_argument('--run_final', action='store_true',
                        help='Run final model with multiple seeds')
-    parser.add_argument('--num_seeds', type=int, default=5,
+    parser.add_argument('--num_seeds', type=int, default=1,
                        help='Number of seeds for final model')
     parser.add_argument('--run_all', action='store_true',
                        help='Run all experiments')
