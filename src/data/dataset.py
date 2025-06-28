@@ -462,6 +462,5 @@ class HoCDataModule:
             'entity_mapping': entity_mappings,
             'entity_types': entity_types,
             'entity_confidences': entity_confidences,
-            'biological_context': biological_context,
-            'indices': torch.tensor([sample['idx'] for sample in batch])
+            'biological_context': biological_context
         }
