@@ -172,7 +172,7 @@ if __name__ == "__main__":
     logger.info("="*80)
     logger.info("RUNNING BASELINE EXPERIMENT")
     logger.info("="*80)
-    run_simple_baseline()
+    #run_simple_baseline()
     
     # Then run with KG
     logger.info("\n" + "="*80)

@@ -373,7 +373,12 @@ class Trainer:
     
     def _check_early_stopping(self, val_metrics: Dict[str, float]) -> bool:
         """Check early stopping criteria."""
-        current_metric = val_metrics[self.early_stopping_metric]
+        # Remove 'val_' prefix if present in the metric name
+        metric_key = self.early_stopping_metric
+        if metric_key.startswith('val_'):
+            metric_key = metric_key[4:]  # Remove 'val_' prefix
+        
+        current_metric = val_metrics[metric_key]
         
         if current_metric - self.best_metric > self.early_stopping_min_delta:
             self.patience_counter = 0
