@@ -29,7 +29,7 @@ def run_simple_baseline():
     
     # Modify for baseline experiment (BioBERT only)
     config['experiment']['name'] = 'simple_baseline_test'
-    config['training']['batch_size'] = 16  # Reasonable batch size
+    config['training']['batch_size'] = 64  # Larger batch size for better GPU utilization
     config['training']['max_epochs'] = 1  # Just 1 epoch for testing
     
     # Add some training settings
