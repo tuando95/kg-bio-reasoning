@@ -74,8 +74,12 @@ class BioKGBioBERT(nn.Module):
         if self.use_bio_attention:
             # Replace top BioBERT layers with biological attention
             num_bio_layers = config.get('num_bio_attention_layers', 2)
+            # Create config structure expected by BiologicalTransformerLayer
+            bio_config = {
+                'model': config
+            }
             self.bio_attention_layers = nn.ModuleList([
-                BiologicalTransformerLayer(config) for _ in range(num_bio_layers)
+                BiologicalTransformerLayer(bio_config) for _ in range(num_bio_layers)
             ])
         
         # Multi-modal fusion

@@ -91,7 +91,10 @@ class Trainer:
     def _setup_model(self):
         """Initialize model."""
         logger.info("Initializing BioKG-BioBERT model...")
-        self.model = BioKGBioBERT(self.config)
+        # Pass model config with loss weights from training config
+        model_config = self.config['model'].copy()
+        model_config['loss_weights'] = self.config['training']['loss_weights']
+        self.model = BioKGBioBERT(model_config)
         self.model.to(self.device)
         
         # Multi-GPU training
@@ -418,7 +421,7 @@ class Trainer:
     def _load_checkpoint(self, checkpoint_name: str):
         """Load model checkpoint."""
         checkpoint_path = self.checkpoint_dir / checkpoint_name
-        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
         
         self.model.load_state_dict(checkpoint['model_state_dict'])
         logger.info(f"Loaded checkpoint from {checkpoint_path}")

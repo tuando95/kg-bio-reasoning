@@ -7,6 +7,12 @@ model:
   num_labels: 11  # 10 hallmarks + "None"
   dropout_rate: 0.1
   
+  # Model component flags
+  use_knowledge_graph: true
+  use_bio_attention: true
+  num_bio_attention_layers: 2
+  num_pathways: 50  # Number of pathways for auxiliary task
+  
   # Biological Attention Configuration
   bio_attention:
     num_heads: 8
