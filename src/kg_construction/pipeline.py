@@ -209,7 +209,12 @@ class BiologicalKGPipeline:
         
         # Initialize node features (placeholder - would use actual embeddings)
         num_nodes = len(node_to_idx)
-        node_features = torch.zeros(num_nodes, 768)  # Using BERT dimension
+        
+        # Ensure at least one node (dummy node if graph is empty)
+        if num_nodes == 0:
+            node_features = torch.zeros(1, 768)  # Dummy node with BERT dimension
+        else:
+            node_features = torch.zeros(num_nodes, 768)  # Using BERT dimension
         
         # Create edge index tensor
         edge_list = []
@@ -224,13 +229,20 @@ class BiologicalKGPipeline:
             edge_types.append(data.get('edge_type', 'unknown'))
             edge_weights.append(data.get('confidence', 1.0))
         
-        edge_index = torch.tensor(edge_list, dtype=torch.long).t()
-        edge_weights = torch.tensor(edge_weights, dtype=torch.float)
-        
-        # Create edge type encoding
-        unique_edge_types = list(set(edge_types))
-        edge_type_to_idx = {etype: idx for idx, etype in enumerate(unique_edge_types)}
-        edge_type_indices = torch.tensor([edge_type_to_idx[etype] for etype in edge_types])
+        if edge_list:
+            edge_index = torch.tensor(edge_list, dtype=torch.long).t()
+            edge_weights = torch.tensor(edge_weights, dtype=torch.float)
+            
+            # Create edge type encoding
+            unique_edge_types = list(set(edge_types))
+            edge_type_to_idx = {etype: idx for idx, etype in enumerate(unique_edge_types)}
+            edge_type_indices = torch.tensor([edge_type_to_idx[etype] for etype in edge_types])
+        else:
+            # Empty graph - no edges
+            edge_index = torch.zeros((2, 0), dtype=torch.long)
+            edge_weights = torch.zeros(0, dtype=torch.float)
+            edge_type_indices = torch.zeros(0, dtype=torch.long)
+            edge_type_to_idx = {}
         
         return {
             'node_features': node_features,

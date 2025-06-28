@@ -195,32 +195,41 @@ class CachedHallmarksDataset(Dataset):
         """Prepare knowledge graph for PyTorch Geometric."""
         # Create node features (placeholder - should match pipeline output)
         num_nodes = kg.number_of_nodes()
-        node_features = torch.randn(num_nodes, 768)  # BioBERT dimension
         
-        # Create edge index
-        edge_list = []
-        edge_types = []
-        
-        node_to_idx = {node: idx for idx, node in enumerate(kg.nodes())}
-        
-        for source, target, data in kg.edges(data=True):
-            source_idx = node_to_idx[source]
-            target_idx = node_to_idx[target]
-            edge_list.append([source_idx, target_idx])
-            edge_types.append(self._edge_type_to_id(data.get('edge_type', 'unknown')))
-        
-        if edge_list:
-            edge_index = torch.tensor(edge_list, dtype=torch.long).t()
-            edge_attr = torch.tensor(edge_types, dtype=torch.long)
-        else:
+        # Ensure at least one node (dummy node if graph is empty)
+        if num_nodes == 0:
+            num_nodes = 1
+            node_features = torch.zeros(1, 768)  # BioBERT dimension
             edge_index = torch.zeros((2, 0), dtype=torch.long)
             edge_attr = torch.zeros(0, dtype=torch.long)
-        
-        # Create node types
-        node_types = []
-        for node in kg.nodes():
-            node_data = kg.nodes[node]
-            node_types.append(self._node_type_to_id(node_data.get('node_type', 'unknown')))
+            node_types = [5]  # unknown type
+        else:
+            node_features = torch.randn(num_nodes, 768)  # BioBERT dimension
+            
+            # Create edge index
+            edge_list = []
+            edge_types = []
+            
+            node_to_idx = {node: idx for idx, node in enumerate(kg.nodes())}
+            
+            for source, target, data in kg.edges(data=True):
+                source_idx = node_to_idx[source]
+                target_idx = node_to_idx[target]
+                edge_list.append([source_idx, target_idx])
+                edge_types.append(self._edge_type_to_id(data.get('edge_type', 'unknown')))
+            
+            if edge_list:
+                edge_index = torch.tensor(edge_list, dtype=torch.long).t()
+                edge_attr = torch.tensor(edge_types, dtype=torch.long)
+            else:
+                edge_index = torch.zeros((2, 0), dtype=torch.long)
+                edge_attr = torch.zeros(0, dtype=torch.long)
+            
+            # Create node types
+            node_types = []
+            for node in kg.nodes():
+                node_data = kg.nodes[node]
+                node_types.append(self._node_type_to_id(node_data.get('node_type', 'unknown')))
         
         # Create PyTorch Geometric Data object
         data = GraphData(
