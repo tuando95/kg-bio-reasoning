@@ -44,7 +44,7 @@ def create_biological_metrics_comparison(results_dict: Dict, save_path: Path):
     violation_rates = []
     
     for model in models:
-        metrics = results_dict[model].get('optimal_thresholds', {})
+        metrics = results_dict[model].get('metrics', {})
         synergy_rates.append(metrics.get('bio_synergy_capture_rate', 0))
         plausibility_scores.append(metrics.get('bio_plausibility_score', 0))
         violation_rates.append(metrics.get('bio_incompatible_violation_rate', 0))
@@ -207,7 +207,7 @@ def create_performance_radar_chart(results_dict: Dict, save_path: Path):
     colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
     for idx, (model, color) in enumerate(zip(results_dict.keys(), colors)):
         values = []
-        metrics_data = results_dict[model].get('optimal_thresholds', {})
+        metrics_data = results_dict[model].get('metrics', {})
         
         values.append(metrics_data.get('f1_macro', 0))
         values.append(metrics_data.get('f1_micro', 0))

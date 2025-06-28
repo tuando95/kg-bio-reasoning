@@ -145,6 +145,24 @@ class LearnedMechanisticInterpreter:
         
         return hallmark_genes
     
+    def _reconstruct_graph(self, serialized_graph: Dict) -> nx.MultiDiGraph:
+        """Reconstruct NetworkX graph from serialized format."""
+        graph = nx.MultiDiGraph()
+        
+        # Add nodes
+        for node, attrs in serialized_graph['nodes']:
+            graph.add_node(node, **attrs)
+        
+        # Add edges
+        for u, v, attrs in serialized_graph['edges']:
+            graph.add_edge(u, v, **attrs)
+        
+        # Add graph attributes
+        if 'graph' in serialized_graph:
+            graph.graph = serialized_graph['graph']
+        
+        return graph
+    
     def load_model(self, checkpoint_path: str) -> torch.nn.Module:
         """Load trained model."""
         checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
@@ -655,11 +673,31 @@ class LearnedMechanisticInterpreter:
         sample_count = 0
         
         # Use cached dataset for analysis
-        cache_file = Path(self.config['data']['cache_dir']) / "cached_test_dataset.pkl"
-        if cache_file.exists():
+        cache_dir = Path(self.config['dataset']['cache_dir'])
+        test_cache_dir = cache_dir / 'test'
+        cache_index_path = test_cache_dir / "index.json"
+        
+        if cache_index_path.exists():
             logger.info("Loading cached test dataset...")
-            with open(cache_file, 'rb') as f:
-                cached_data = pickle.load(f)
+            
+            # Load cache index
+            with open(cache_index_path, 'r') as f:
+                cache_index = json.load(f)
+            
+            # Load cached samples
+            cached_data = []
+            for sample_id, cache_info in cache_index.items():
+                cache_file = test_cache_dir / cache_info['file']
+                with open(cache_file, 'rb') as f:
+                    sample_data = pickle.load(f)
+                    
+                # Reconstruct knowledge graph if needed
+                if 'knowledge_graph' in sample_data:
+                    kg_data = sample_data['knowledge_graph']
+                    if isinstance(kg_data, dict) and 'nodes' in kg_data:
+                        sample_data['knowledge_graph'] = self._reconstruct_graph(kg_data)
+                
+                cached_data.append(sample_data)
             
             for sample_idx, sample_data in enumerate(cached_data):
                 if sample_count >= num_samples:

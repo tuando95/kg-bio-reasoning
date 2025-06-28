@@ -342,81 +342,36 @@ class ComprehensiveAnalyzer:
         return results
     
     def analyze_model(self, checkpoint_path: str, model_name: str) -> Dict:
-        """Complete analysis of a single model including threshold optimization."""
+        """Complete analysis of a single model."""
         logger.info(f"\nAnalyzing {model_name}...")
         
         # Load model
         model, checkpoint = self.load_model(checkpoint_path)
-        
-        # Get predictions on validation set for threshold optimization
-        logger.info("Getting validation predictions for threshold optimization...")
-        val_loader = self.data_module.val_dataloader()
-        val_predictions, val_targets = self.get_predictions(model, val_loader)
-        
-        # Optimize thresholds
-        logger.info("Optimizing thresholds...")
-        optimal_thresholds, threshold_details, global_best_threshold = self.optimize_thresholds(val_predictions, val_targets)
-        
-        # Log threshold details
-        logger.info("Threshold optimization details (on validation set):")
-        logger.info(f"  Global optimal threshold: {global_best_threshold:.3f}")
-        
-        # Show statistics about threshold distribution
-        per_class_thresholds = [optimal_thresholds[i] for i in range(11)]
-        logger.info(f"  Per-class threshold stats: mean={np.mean(per_class_thresholds):.3f}, "
-                   f"std={np.std(per_class_thresholds):.3f}, "
-                   f"min={np.min(per_class_thresholds):.3f}, max={np.max(per_class_thresholds):.3f}")
-        
-        # Show details for problematic classes (0 and 10) and some others
-        important_classes = [0, 1, 4, 9, 10]  # Include low-performing and high-performing
-        for i in important_classes:
-            detail = threshold_details[i]
-            logger.info(f"  {detail['hallmark_name']}: "
-                       f"threshold={detail['optimal_threshold']:.3f} (F1={detail['optimal_f1']:.3f}), "
-                       f"default=0.5 (F1={detail['default_f1']:.3f}), "
-                       f"support={detail['support']}")
         
         # Get test set predictions
         logger.info("Evaluating on test set...")
         test_loader = self.data_module.test_dataloader()
         test_predictions, test_targets = self.get_predictions(model, test_loader)
         
-        # Evaluate with default and optimal thresholds
-        results_default = self.evaluate_with_thresholds(test_predictions, test_targets, None)
-        results_optimal = self.evaluate_with_thresholds(test_predictions, test_targets, optimal_thresholds)
-        
-        # Also evaluate with global threshold
-        global_thresholds = {i: global_best_threshold for i in range(11)}
-        results_global = self.evaluate_with_thresholds(test_predictions, test_targets, global_thresholds)
-        
-        # Log comparison
-        logger.info(f"  Test evaluation comparison:")
-        logger.info(f"    Default (0.5): Macro-F1={results_default['f1_macro']:.4f}, Micro-F1={results_default['f1_micro']:.4f}")
-        logger.info(f"    Global optimal: Macro-F1={results_global['f1_macro']:.4f}, Micro-F1={results_global['f1_micro']:.4f}")
-        logger.info(f"    Per-class optimal: Macro-F1={results_optimal['f1_macro']:.4f}, Micro-F1={results_optimal['f1_micro']:.4f}")
+        # Evaluate with default thresholds (0.5)
+        results = self.evaluate_with_thresholds(test_predictions, test_targets, None)
         
         # Compile results
-        results = {
+        full_results = {
             'model_name': model_name,
             'checkpoint_path': checkpoint_path,
-            'default_thresholds': results_default,
-            'optimal_thresholds': results_optimal,
-            'threshold_values': optimal_thresholds,
-            'threshold_details': threshold_details,
+            'metrics': results,
             'test_predictions': test_predictions,
-            'test_targets': test_targets,
-            'improvement': {
-                'f1_micro': results_optimal['f1_micro'] - results_default['f1_micro'],
-                'f1_macro': results_optimal['f1_macro'] - results_default['f1_macro']
-            }
+            'test_targets': test_targets
         }
         
         logger.info(f"{model_name} Results:")
-        logger.info(f"  Default: Macro-F1={results_default['f1_macro']:.4f}, Micro-F1={results_default['f1_micro']:.4f}")
-        logger.info(f"  Optimal: Macro-F1={results_optimal['f1_macro']:.4f}, Micro-F1={results_optimal['f1_micro']:.4f}")
-        logger.info(f"  Improvement: +{results['improvement']['f1_macro']:.4f}")
+        logger.info(f"  Macro-F1: {results['f1_macro']:.4f}")
+        logger.info(f"  Micro-F1: {results['f1_micro']:.4f}")
+        logger.info(f"  Hamming Loss: {results['hamming_loss']:.4f}")
+        logger.info(f"  Exact Match Ratio: {results['exact_match_ratio']:.4f}")
         
-        return results
+        return full_results
     
     def plot_performance_comparison(self, all_results: Dict[str, Dict], save_path: Path):
         """Plot comprehensive performance comparison."""
@@ -424,58 +379,55 @@ class ComprehensiveAnalyzer:
         
         # Prepare data
         metrics_data = {
-            'Model': [],
-            'Threshold': [],
-            'Micro-F1': [],
-            'Macro-F1': [],
-            'Hamming Loss': [],
-            'EMR': []
+            'Model': models,
+            'Micro-F1': [all_results[m]['metrics']['f1_micro'] for m in models],
+            'Macro-F1': [all_results[m]['metrics']['f1_macro'] for m in models],
+            'Hamming Loss': [all_results[m]['metrics']['hamming_loss'] for m in models],
+            'EMR': [all_results[m]['metrics']['exact_match_ratio'] for m in models]
         }
         
-        for model in models:
-            # Default thresholds
-            metrics_data['Model'].append(model)
-            metrics_data['Threshold'].append('Default')
-            metrics_data['Micro-F1'].append(all_results[model]['default_thresholds']['f1_micro'])
-            metrics_data['Macro-F1'].append(all_results[model]['default_thresholds']['f1_macro'])
-            metrics_data['Hamming Loss'].append(all_results[model]['default_thresholds']['hamming_loss'])
-            metrics_data['EMR'].append(all_results[model]['default_thresholds']['exact_match_ratio'])
-            
-            # Optimal thresholds
-            metrics_data['Model'].append(model)
-            metrics_data['Threshold'].append('Optimal')
-            metrics_data['Micro-F1'].append(all_results[model]['optimal_thresholds']['f1_micro'])
-            metrics_data['Macro-F1'].append(all_results[model]['optimal_thresholds']['f1_macro'])
-            metrics_data['Hamming Loss'].append(all_results[model]['optimal_thresholds']['hamming_loss'])
-            metrics_data['EMR'].append(all_results[model]['optimal_thresholds']['exact_match_ratio'])
-        
         df = pd.DataFrame(metrics_data)
+        
+        # Sort by Macro-F1 for better visualization
+        df = df.sort_values('Macro-F1', ascending=True)
         
         # Create subplots
         fig, axes = plt.subplots(2, 2, figsize=(14, 10))
         axes = axes.flatten()
         
         metrics = ['Micro-F1', 'Macro-F1', 'Hamming Loss', 'EMR']
-        for idx, metric in enumerate(metrics):
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
+        
+        for idx, (metric, color) in enumerate(zip(metrics, colors)):
             ax = axes[idx]
             
-            # Create grouped bar plot
-            metric_df = df.pivot(index='Model', columns='Threshold', values=metric)
-            metric_df.plot(kind='bar', ax=ax, width=0.8)
-            
-            ax.set_title(f'{metric} Comparison')
-            ax.set_ylabel(metric)
-            ax.set_xlabel('')
-            ax.legend(title='Threshold Type')
-            ax.grid(axis='y', alpha=0.3)
-            
-            # Rotate x labels
-            ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+            # Create horizontal bar plot
+            bars = ax.barh(df['Model'], df[metric], color=color, alpha=0.7)
             
             # Add value labels
-            for container in ax.containers:
-                ax.bar_label(container, fmt='%.3f', fontsize=8)
+            for bar in bars:
+                width = bar.get_width()
+                ax.text(width + 0.005, bar.get_y() + bar.get_height()/2, 
+                       f'{width:.3f}', ha='left', va='center', fontsize=9)
+            
+            ax.set_title(f'{metric}', fontsize=14)
+            ax.set_xlabel(metric)
+            ax.grid(axis='x', alpha=0.3)
+            
+            # Highlight best performer
+            if metric == 'Hamming Loss':  # Lower is better
+                best_idx = df[metric].idxmin()
+            else:  # Higher is better
+                best_idx = df[metric].idxmax()
+            
+            # Make best performer's bar darker
+            for i, bar in enumerate(bars):
+                if df.iloc[i].name == best_idx:
+                    bar.set_alpha(1.0)
+                    bar.set_edgecolor('black')
+                    bar.set_linewidth(2)
         
+        plt.suptitle('Model Performance Comparison', fontsize=16)
         plt.tight_layout()
         plt.savefig(save_path / 'performance_comparison.png', dpi=300, bbox_inches='tight')
         plt.close()
@@ -536,43 +488,47 @@ class ComprehensiveAnalyzer:
             f.write("PERFORMANCE SUMMARY\n")
             f.write("-" * 40 + "\n\n")
             
-            # Sort models by optimal macro-F1
+            # Sort models by macro-F1
             sorted_models = sorted(all_results.items(), 
-                                 key=lambda x: x[1]['optimal_thresholds']['f1_macro'], 
+                                 key=lambda x: x[1]['metrics']['f1_macro'], 
                                  reverse=True)
             
-            f.write("Rankings by Macro-F1 (with optimal thresholds):\n")
+            f.write("Rankings by Macro-F1:\n")
             for rank, (model, results) in enumerate(sorted_models, 1):
-                opt_macro = results['optimal_thresholds']['f1_macro']
-                def_macro = results['default_thresholds']['f1_macro']
-                improvement = opt_macro - def_macro
-                f.write(f"{rank}. {model}: {opt_macro:.4f} (default: {def_macro:.4f}, +{improvement:.4f})\n")
+                metrics = results['metrics']
+                f.write(f"{rank}. {model}: "
+                       f"Macro-F1={metrics['f1_macro']:.4f}, "
+                       f"Micro-F1={metrics['f1_micro']:.4f}, "
+                       f"Hamming Loss={metrics['hamming_loss']:.4f}\n")
             
             # Detailed results per model
             f.write("\n\nDETAILED RESULTS\n")
             f.write("-" * 40 + "\n")
             
-            for model, results in all_results.items():
+            for model, results in sorted_models:
+                metrics = results['metrics']
                 f.write(f"\n{model}:\n")
-                f.write("  Default Thresholds (0.5):\n")
-                for metric in ['f1_micro', 'f1_macro', 'hamming_loss', 'exact_match_ratio']:
-                    f.write(f"    {metric}: {results['default_thresholds'][metric]:.4f}\n")
+                f.write(f"  Macro-F1: {metrics['f1_macro']:.4f}\n")
+                f.write(f"  Micro-F1: {metrics['f1_micro']:.4f}\n")
+                f.write(f"  Weighted-F1: {metrics['f1_weighted']:.4f}\n")
+                f.write(f"  Hamming Loss: {metrics['hamming_loss']:.4f}\n")
+                f.write(f"  Exact Match Ratio: {metrics['exact_match_ratio']:.4f}\n")
                 
-                f.write("  Optimal Thresholds:\n")
-                for metric in ['f1_micro', 'f1_macro', 'hamming_loss', 'exact_match_ratio']:
-                    f.write(f"    {metric}: {results['optimal_thresholds'][metric]:.4f}\n")
+                # Per-hallmark performance
+                f.write("\n  Per-Hallmark F1 Scores:\n")
+                per_hallmark = metrics['per_hallmark_metrics']
                 
-                f.write("  Improvements:\n")
-                f.write(f"    Micro-F1: +{results['improvement']['f1_micro']:.4f}\n")
-                f.write(f"    Macro-F1: +{results['improvement']['f1_macro']:.4f}\n")
+                # Sort by F1 score to show best and worst
+                sorted_hallmarks = sorted(per_hallmark, key=lambda x: x['f1'], reverse=True)
                 
-                # Top threshold changes
-                threshold_df = pd.DataFrame(results['threshold_details'])
-                top_changes = threshold_df.nlargest(3, 'f1_improvement')
-                f.write("  Top Hallmark Improvements:\n")
-                for _, row in top_changes.iterrows():
-                    f.write(f"    - {row['hallmark_name']}: +{row['f1_improvement']:.3f} "
-                           f"(threshold: {row['optimal_threshold']:.3f})\n")
+                # Show top 3 and bottom 3
+                f.write("    Best performing:\n")
+                for h in sorted_hallmarks[:3]:
+                    f.write(f"      - {h['hallmark']}: {h['f1']:.3f} (P={h['precision']:.3f}, R={h['recall']:.3f})\n")
+                
+                f.write("    Worst performing:\n")
+                for h in sorted_hallmarks[-3:]:
+                    f.write(f"      - {h['hallmark']}: {h['f1']:.3f} (P={h['precision']:.3f}, R={h['recall']:.3f})\n")
             
             # Statistical significance
             f.write("\n\nSTATISTICAL SIGNIFICANCE (McNemar's Test)\n")
@@ -599,21 +555,21 @@ class ComprehensiveAnalyzer:
             f.write("\n\nBIOLOGICAL METRICS INTERPRETATION\n")
             f.write("-" * 40 + "\n")
             
-            # Get best model's biological metrics
-            best_bio_metrics = sorted_models[0][1]['optimal_thresholds']
+            # Get best model's metrics
+            best_metrics = sorted_models[0][1]['metrics']
             
             f.write("\nBio-Synergy Capture Rate:\n")
-            f.write(f"  Best model: {best_bio_metrics.get('bio_synergy_capture_rate', 0):.3f}\n")
+            f.write(f"  Best model: {best_metrics.get('bio_synergy_capture_rate', 0):.3f}\n")
             f.write(f"  Random baseline: 0.250\n")
-            f.write(f"  Improvement: +{best_bio_metrics.get('bio_synergy_capture_rate_improvement', 0):.3f}\n")
+            f.write(f"  Improvement: +{best_metrics.get('bio_synergy_capture_rate', 0) - 0.250:.3f}\n")
             f.write("  Interpretation: Measures how well the model captures known synergistic\n")
             f.write("  relationships between hallmarks (e.g., angiogenesis → energetics).\n")
             f.write("  Higher values indicate better biological understanding.\n")
             
             f.write("\nBio-Plausibility Score:\n")
-            f.write(f"  Best model: {best_bio_metrics.get('bio_plausibility_score', 0):.3f}\n")
+            f.write(f"  Best model: {best_metrics.get('bio_plausibility_score', 0):.3f}\n")
             f.write(f"  Random baseline: 0.425\n")
-            f.write(f"  Improvement: +{best_bio_metrics.get('bio_plausibility_score_improvement', 0):.3f}\n")
+            f.write(f"  Improvement: +{best_metrics.get('bio_plausibility_score', 0) - 0.425:.3f}\n")
             f.write("  Formula: 0.7×(1-violation_rate) + 0.3×(synergy_rate)\n")
             f.write("  Interpretation: Overall biological consistency combining:\n")
             f.write("    - 70%: Avoiding incompatible hallmark combinations\n")
@@ -624,11 +580,10 @@ class ComprehensiveAnalyzer:
             f.write("-" * 40 + "\n")
             best_model = sorted_models[0][0]
             f.write(f"1. Best performing model: {best_model}\n")
-            f.write("2. Threshold optimization note: In some cases, optimal thresholds may perform\n")
-            f.write("   worse on test set due to overfitting to validation set distribution.\n")
-            f.write("   Consider using default thresholds (0.5) for more robust performance.\n")
+            f.write("2. The high baseline performance suggests the cached KG features are very informative\n")
             f.write("3. Consider ensemble methods for further improvement\n")
-            f.write("4. The high baseline performance suggests the cached KG features are very informative\n")
+            f.write("4. Focus on improving performance for low-performing hallmarks (classes 0 and 10)\n")
+            f.write("5. The biological consistency metrics show the model captures biological relationships well\n")
         
         logger.info("Comprehensive report generated")
 
@@ -674,12 +629,8 @@ def main():
         
         for model_name in all_results:
             if model_name != 'baseline_biobert':
-                # Use optimal thresholds for the model
-                model_pred = np.zeros_like(all_results[model_name]['test_predictions'])
-                optimal_thresholds = all_results[model_name]['threshold_values']
-                for i in range(11):
-                    threshold = optimal_thresholds.get(i, 0.5)
-                    model_pred[:, i] = (all_results[model_name]['test_predictions'][:, i] >= threshold).astype(int)
+                # Use default threshold (0.5) for fair comparison
+                model_pred = (all_results[model_name]['test_predictions'] >= 0.5).astype(int)
                 
                 mcnemar_result = analyzer.mcnemar_test(baseline_pred, model_pred, baseline_targets)
                 mcnemar_results[f'baseline_biobert vs {model_name}'] = mcnemar_result
@@ -691,11 +642,8 @@ def main():
     results_to_save = {}
     for model, results in all_results.items():
         results_to_save[model] = {
-            'default_thresholds': results['default_thresholds'],
-            'optimal_thresholds': results['optimal_thresholds'],
-            'threshold_values': results['threshold_values'],
-            'threshold_details': results['threshold_details'],
-            'improvement': results['improvement']
+            'metrics': results['metrics'],
+            'model_name': results['model_name']
         }
     
     # Convert numpy types to Python native types for JSON serialization
@@ -732,59 +680,29 @@ def main():
         # Get predictions and targets
         predictions = results['test_predictions']
         targets = results['test_targets']
-        optimal_thresholds = results['threshold_values']
         
-        # Generate binary predictions
-        pred_default = (predictions >= 0.5).astype(int)
-        pred_optimal = np.zeros_like(predictions)
-        for i in range(11):
-            threshold = optimal_thresholds.get(i, 0.5)
-            pred_optimal[:, i] = (predictions[:, i] >= threshold).astype(int)
+        # Generate binary predictions with default threshold (0.5)
+        pred_binary = (predictions >= 0.5).astype(int)
         
-        # Save classification results before threshold optimization
-        classification_default = []
+        # Save classification results
+        classification_results = []
         for i in range(len(targets)):
             sample_result = {
                 'sample_id': i,
                 'true_labels': targets[i].tolist(),
-                'predicted_labels': pred_default[i].tolist(),
+                'predicted_labels': pred_binary[i].tolist(),
                 'prediction_scores': predictions[i].tolist(),
-                'thresholds_used': [0.5] * 11,
-                'correct_predictions': (pred_default[i] == targets[i]).tolist(),
-                'exact_match': bool(np.all(pred_default[i] == targets[i]))
+                'correct_predictions': (pred_binary[i] == targets[i]).tolist(),
+                'exact_match': bool(np.all(pred_binary[i] == targets[i]))
             }
-            classification_default.append(sample_result)
+            classification_results.append(sample_result)
         
-        with open(model_dir / 'test_classification_default_threshold.json', 'w') as f:
+        with open(model_dir / 'test_classification_results.json', 'w') as f:
             json.dump({
                 'model_name': model_name,
-                'threshold_type': 'default',
-                'thresholds': {str(i): 0.5 for i in range(11)},
-                'overall_metrics': results['default_thresholds'],
-                'samples': classification_default
-            }, f, indent=2)
-        
-        # Save classification results after threshold optimization
-        classification_optimal = []
-        for i in range(len(targets)):
-            sample_result = {
-                'sample_id': i,
-                'true_labels': targets[i].tolist(),
-                'predicted_labels': pred_optimal[i].tolist(),
-                'prediction_scores': predictions[i].tolist(),
-                'thresholds_used': [optimal_thresholds.get(j, 0.5) for j in range(11)],
-                'correct_predictions': (pred_optimal[i] == targets[i]).tolist(),
-                'exact_match': bool(np.all(pred_optimal[i] == targets[i]))
-            }
-            classification_optimal.append(sample_result)
-        
-        with open(model_dir / 'test_classification_optimal_threshold.json', 'w') as f:
-            json.dump({
-                'model_name': model_name,
-                'threshold_type': 'optimal',
-                'thresholds': {str(i): optimal_thresholds.get(i, 0.5) for i in range(11)},
-                'overall_metrics': results['optimal_thresholds'],
-                'samples': classification_optimal
+                'threshold': 0.5,
+                'overall_metrics': convert_numpy_types(results['metrics']),
+                'samples': classification_results
             }, f, indent=2)
         
         # Save per-hallmark summary
@@ -798,30 +716,29 @@ def main():
             
             # Calculate metrics for this hallmark
             true_h = targets[:, h_id]
-            pred_default_h = pred_default[:, h_id]
-            pred_optimal_h = pred_optimal[:, h_id]
+            pred_h = pred_binary[:, h_id]
+            
+            tp = int(((pred_h == 1) & (true_h == 1)).sum())
+            fp = int(((pred_h == 1) & (true_h == 0)).sum())
+            tn = int(((pred_h == 0) & (true_h == 0)).sum())
+            fn = int(((pred_h == 0) & (true_h == 1)).sum())
+            
+            precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+            recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+            f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
             
             hallmark_summary['hallmarks'][h_name] = {
                 'hallmark_id': h_id,
                 'total_samples': len(true_h),
                 'positive_samples': int(true_h.sum()),
                 'negative_samples': int((1 - true_h).sum()),
-                'default_threshold': {
-                    'threshold': 0.5,
-                    'true_positives': int(((pred_default_h == 1) & (true_h == 1)).sum()),
-                    'false_positives': int(((pred_default_h == 1) & (true_h == 0)).sum()),
-                    'true_negatives': int(((pred_default_h == 0) & (true_h == 0)).sum()),
-                    'false_negatives': int(((pred_default_h == 0) & (true_h == 1)).sum()),
-                    'f1_score': float(f1_score(true_h, pred_default_h))
-                },
-                'optimal_threshold': {
-                    'threshold': optimal_thresholds.get(h_id, 0.5),
-                    'true_positives': int(((pred_optimal_h == 1) & (true_h == 1)).sum()),
-                    'false_positives': int(((pred_optimal_h == 1) & (true_h == 0)).sum()),
-                    'true_negatives': int(((pred_optimal_h == 0) & (true_h == 0)).sum()),
-                    'false_negatives': int(((pred_optimal_h == 0) & (true_h == 1)).sum()),
-                    'f1_score': float(f1_score(true_h, pred_optimal_h))
-                }
+                'true_positives': tp,
+                'false_positives': fp,
+                'true_negatives': tn,
+                'false_negatives': fn,
+                'precision': float(precision),
+                'recall': float(recall),
+                'f1_score': float(f1)
             }
         
         with open(model_dir / 'hallmark_classification_summary.json', 'w') as f:
@@ -845,11 +762,11 @@ def main():
     logger.info("\nQUICK SUMMARY")
     logger.info("=" * 40)
     sorted_models = sorted(all_results.items(), 
-                         key=lambda x: x[1]['optimal_thresholds']['f1_macro'], 
+                         key=lambda x: x[1]['metrics']['f1_macro'], 
                          reverse=True)
     for model, results in sorted_models:
-        opt_macro = results['optimal_thresholds']['f1_macro']
-        logger.info(f"{model}: {opt_macro:.4f} (optimal thresholds)")
+        macro_f1 = results['metrics']['f1_macro']
+        logger.info(f"{model}: {macro_f1:.4f}")
 
 
 if __name__ == "__main__":

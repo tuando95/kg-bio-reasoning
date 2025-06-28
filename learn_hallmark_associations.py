@@ -70,15 +70,57 @@ class HallmarkAssociationLearner:
     
     def load_cached_dataset(self, split: str = 'train') -> List[Dict]:
         """Load cached dataset with KGs."""
-        cache_dir = Path(self.config['data']['cache_dir'])
-        cache_file = cache_dir / f"cached_{split}_dataset.pkl"
+        cache_dir = Path(self.config['dataset']['cache_dir'])
+        split_cache_dir = cache_dir / split
+        cache_index_path = split_cache_dir / "index.json"
         
-        logger.info(f"Loading cached {split} dataset from {cache_file}")
+        if not cache_index_path.exists():
+            logger.error(f"Cache index not found at {cache_index_path}")
+            raise FileNotFoundError(f"Please run preprocess_kg_data.py first to create cached data")
         
-        with open(cache_file, 'rb') as f:
-            cached_data = pickle.load(f)
+        logger.info(f"Loading cached {split} dataset from {split_cache_dir}")
         
+        # Load cache index
+        with open(cache_index_path, 'r') as f:
+            cache_index = json.load(f)
+        
+        # Load all cached samples
+        cached_data = []
+        for sample_id, cache_info in tqdm(cache_index.items(), desc=f"Loading {split} samples"):
+            cache_file = split_cache_dir / cache_info['file']
+            
+            with open(cache_file, 'rb') as f:
+                sample_data = pickle.load(f)
+            
+            # Reconstruct the knowledge graph from serialized format
+            if 'knowledge_graph' in sample_data:
+                kg_data = sample_data['knowledge_graph']
+                # If it's serialized as node-link format, reconstruct
+                if isinstance(kg_data, dict) and 'nodes' in kg_data:
+                    sample_data['knowledge_graph'] = self._reconstruct_graph(kg_data)
+            
+            cached_data.append(sample_data)
+        
+        logger.info(f"Loaded {len(cached_data)} samples from {split} split")
         return cached_data
+    
+    def _reconstruct_graph(self, serialized_graph: Dict) -> nx.MultiDiGraph:
+        """Reconstruct NetworkX graph from serialized format."""
+        graph = nx.MultiDiGraph()
+        
+        # Add nodes
+        for node, attrs in serialized_graph['nodes']:
+            graph.add_node(node, **attrs)
+        
+        # Add edges
+        for u, v, attrs in serialized_graph['edges']:
+            graph.add_edge(u, v, **attrs)
+        
+        # Add graph attributes
+        if 'graph' in serialized_graph:
+            graph.graph = serialized_graph['graph']
+        
+        return graph
     
     def extract_associations(self, cached_data: List[Dict]):
         """Extract associations from cached KG data."""
@@ -88,7 +130,9 @@ class HallmarkAssociationLearner:
             self.total_samples += 1
             
             # Get labels for this sample
-            labels = sample.get('labels', np.array([]))
+            labels = sample.get('labels', [])
+            if isinstance(labels, list):
+                labels = np.array(labels)
             active_hallmarks = np.where(labels == 1)[0].tolist()
             
             # Update hallmark sample counts
