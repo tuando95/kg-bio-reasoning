@@ -126,6 +126,11 @@ class HallmarkAssociationLearner:
         """Extract associations from cached KG data."""
         logger.info(f"Extracting associations from {len(cached_data)} samples")
         
+        # Debug counters
+        samples_with_kg = 0
+        samples_with_pathways = 0
+        samples_with_genes = 0
+        
         for sample_idx, sample in enumerate(tqdm(cached_data, desc="Processing samples")):
             self.total_samples += 1
             
@@ -141,15 +146,32 @@ class HallmarkAssociationLearner:
             
             # Get knowledge graph
             kg = sample.get('knowledge_graph', None)
-            if kg is None or len(kg.nodes()) == 0:
+            if kg is None:
+                continue
+            
+            # Check if KG has nodes (handle both formats)
+            if isinstance(kg, nx.MultiDiGraph):
+                if len(kg.nodes()) == 0:
+                    continue
+            elif isinstance(kg, dict) and 'nodes' in kg:
+                if len(kg['nodes']) == 0:
+                    continue
+            else:
                 continue
             
             # Extract biological entities from KG
             pathways, genes, entities = self._extract_kg_entities(kg)
             
+            # Update debug counters
+            samples_with_kg += 1
+            if pathways:
+                samples_with_pathways += 1
+            if genes:
+                samples_with_genes += 1
+            
             # Update background counts
             for pathway_id, pathway_name in pathways.items():
-                self.total_pathway_counts[pathway_id] += 1
+                self.total_pathway_counts[f"{pathway_id}:{pathway_name}"] += 1
             for gene in genes:
                 self.total_gene_counts[gene] += 1
             for entity_type, entity_set in entities.items():
@@ -175,17 +197,27 @@ class HallmarkAssociationLearner:
                         self.hallmark_entity_counts[hallmark_id][f"{entity_type}:{entity}"] += 1
         
         logger.info(f"Processed {self.total_samples} samples")
+        logger.info(f"Samples with KG: {samples_with_kg}")
+        logger.info(f"Samples with pathways: {samples_with_pathways}")
+        logger.info(f"Samples with genes: {samples_with_genes}")
         logger.info(f"Found {len(self.total_pathway_counts)} unique pathways")
         logger.info(f"Found {len(self.total_gene_counts)} unique genes")
     
-    def _extract_kg_entities(self, kg: nx.MultiDiGraph) -> Tuple[Dict, Set, Dict]:
+    def _extract_kg_entities(self, kg) -> Tuple[Dict, Set, Dict]:
         """Extract pathways, genes, and other entities from KG."""
         pathways = {}
         genes = set()
         entities = defaultdict(set)
         
-        for node in kg.nodes():
-            node_data = kg.nodes[node]
+        # Handle both NetworkX graph and serialized dict formats
+        if isinstance(kg, nx.MultiDiGraph):
+            nodes_data = [(node, kg.nodes[node]) for node in kg.nodes()]
+        elif isinstance(kg, dict) and 'nodes' in kg:
+            nodes_data = kg['nodes']
+        else:
+            return pathways, genes, entities
+        
+        for node, node_data in nodes_data:
             node_type = node_data.get('node_type', 'unknown')
             
             if node_type == 'pathway':
@@ -220,6 +252,14 @@ class HallmarkAssociationLearner:
     def calculate_association_scores(self) -> Dict:
         """Calculate association scores using statistical measures."""
         logger.info("Calculating association scores")
+        
+        # Debug: Print sample counts per hallmark
+        logger.info("\nHallmark sample distribution:")
+        for h_id in range(11):
+            if h_id == 7:
+                continue
+            count = self.hallmark_sample_counts[h_id]
+            logger.info(f"  Hallmark {h_id} ({self.hallmark_names[h_id]}): {count} samples")
         
         associations = {
             'pathways': defaultdict(dict),
@@ -259,7 +299,7 @@ class HallmarkAssociationLearner:
             support = count / hallmark_samples
             
             # 2. Confidence: P(hallmark | pathway)
-            total_pathway_occurrences = self.total_pathway_counts.get(pathway_id, 1)
+            total_pathway_occurrences = self.total_pathway_counts.get(pathway, 1)
             confidence = count / total_pathway_occurrences
             
             # 3. Lift: How much more likely is this association than random
@@ -290,7 +330,7 @@ class HallmarkAssociationLearner:
                 0.2 * min(chi2_score / 100, 1.0)  # Normalize chi2
             )
             
-            if combined_score > 0.1:  # Threshold for inclusion
+            if combined_score > 0.05:  # Lowered threshold for inclusion
                 pathway_scores[pathway] = {
                     'id': pathway_id,
                     'name': pathway_name,
@@ -308,7 +348,7 @@ class HallmarkAssociationLearner:
                                 key=lambda x: x[1]['score'], 
                                 reverse=True)
         
-        return {k: v for k, v in sorted_pathways[:20]}  # Top 20 pathways
+        return {k: v for k, v in sorted_pathways[:50]}  # Top 50 pathways
     
     def _calculate_gene_scores(self, hallmark_id: int) -> Dict:
         """Calculate gene association scores for a hallmark."""
@@ -336,7 +376,7 @@ class HallmarkAssociationLearner:
                 0.3 * min(lift / 10, 1.0)
             )
             
-            if combined_score > 0.1 and count >= 3:  # Minimum support
+            if combined_score > 0.05 and count >= 2:  # Lowered thresholds
                 gene_scores[gene] = {
                     'symbol': gene,
                     'count': count,
@@ -351,7 +391,7 @@ class HallmarkAssociationLearner:
                              key=lambda x: x[1]['score'], 
                              reverse=True)
         
-        return {k: v for k, v in sorted_genes[:30]}  # Top 30 genes
+        return {k: v for k, v in sorted_genes[:50]}  # Top 50 genes
     
     def _calculate_entity_scores(self, hallmark_id: int) -> Dict:
         """Calculate other entity association scores."""
@@ -492,7 +532,7 @@ class HallmarkAssociationLearner:
         # Labels
         labels = {}
         for node in G.nodes():
-            if node.startswith('H'):
+            if 'label' in G.nodes[node]:
                 labels[node] = G.nodes[node]['label']
             else:
                 labels[node] = node
