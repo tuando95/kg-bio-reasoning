@@ -66,9 +66,11 @@ class BiologicalGAT(nn.Module):
         self.gat_layers = nn.ModuleList()
         
         # First layer
+        # If we have input projection, the first layer should expect hidden_dim
+        first_layer_dim = self.hidden_dim if self.input_projection is not None else self.input_dim
         self.gat_layers.append(
             GATConv(
-                in_channels=self.input_dim,
+                in_channels=first_layer_dim,
                 out_channels=self.hidden_dim // self.num_heads,
                 heads=self.num_heads,
                 dropout=self.dropout,
@@ -323,7 +325,7 @@ class BiologicalGraphEncoder(nn.Module):
         # Projection to match text embedding dimension
         self.output_projection = nn.Linear(
             config['gnn']['hidden_dim'],
-            config['model']['hidden_size']
+            config.get('fusion', {}).get('text_dim', 768)  # Default to BioBERT dimension
         )
         
     def forward(self, graph_data: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
