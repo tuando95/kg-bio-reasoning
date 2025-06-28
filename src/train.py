@@ -97,6 +97,20 @@ class Trainer:
         self.model = BioKGBioBERT(model_config)
         self.model.to(self.device)
         
+        # Log loss weights
+        loss_weights = self.config['training']['loss_weights']
+        logger.info(f"Loss weights:")
+        logger.info(f"  - Hallmark loss: {loss_weights.get('hallmark_loss', 1.0)}")
+        logger.info(f"  - Pathway loss: {loss_weights.get('pathway_loss', 0.0)}")
+        logger.info(f"  - Consistency loss: {loss_weights.get('consistency_loss', 0.0)}")
+        
+        # Calculate and log total parameters
+        total_params = sum(p.numel() for p in self.model.parameters())
+        trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        logger.info(f"Model parameters:")
+        logger.info(f"  - Total parameters: {total_params:,}")
+        logger.info(f"  - Trainable parameters: {trainable_params:,}")
+        
         # Multi-GPU training
         if self.config['experiment']['num_gpus'] > 1:
             self.model = nn.DataParallel(self.model)
@@ -160,7 +174,17 @@ class Trainer:
     
     def train(self):
         """Main training loop."""
-        logger.info("Starting training...")
+        logger.info("\n" + "="*70)
+        logger.info("STARTING TRAINING")
+        logger.info("="*70)
+        logger.info(f"Experiment: {self.experiment_name}")
+        logger.info(f"Device: {self.device}")
+        logger.info(f"Mixed precision: {self.use_amp}")
+        logger.info(f"Max epochs: {self.max_epochs}")
+        logger.info(f"Batch size: {self.config['training']['batch_size']}")
+        logger.info(f"Learning rate: {self.config['training']['learning_rate']}")
+        logger.info(f"Gradient accumulation steps: {self.gradient_accumulation_steps}")
+        logger.info("="*70 + "\n")
         
         train_dataloader = self.data_module.train_dataloader()
         val_dataloader = self.data_module.val_dataloader()
