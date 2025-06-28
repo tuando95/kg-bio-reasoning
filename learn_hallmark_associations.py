@@ -131,14 +131,37 @@ class HallmarkAssociationLearner:
         samples_with_pathways = 0
         samples_with_genes = 0
         
+        # Debug: Check first few samples
+        if len(cached_data) > 0:
+            logger.info(f"First sample label format: {type(cached_data[0].get('labels', cached_data[0].get('label')))}")
+            logger.info(f"First sample label value: {cached_data[0].get('labels', cached_data[0].get('label'))}")
+        
         for sample_idx, sample in enumerate(tqdm(cached_data, desc="Processing samples")):
             self.total_samples += 1
             
             # Get labels for this sample
-            labels = sample.get('labels', [])
-            if isinstance(labels, list):
-                labels = np.array(labels)
-            active_hallmarks = np.where(labels == 1)[0].tolist()
+            labels = sample.get('labels', sample.get('label', []))
+            
+            # Handle different label formats
+            if isinstance(labels, (int, np.integer)):
+                # Single label format
+                active_hallmarks = [int(labels)] if labels != 7 else []  # Skip "None" label
+            elif isinstance(labels, list):
+                if len(labels) > 0 and isinstance(labels[0], (int, np.integer)):
+                    # List of label indices
+                    active_hallmarks = [int(l) for l in labels if l != 7]
+                else:
+                    # Multi-label binary format
+                    labels = np.array(labels)
+                    active_hallmarks = np.where(labels == 1)[0].tolist()
+            else:
+                # Array format
+                if labels.ndim == 0:
+                    # Scalar
+                    active_hallmarks = [int(labels)] if labels != 7 else []
+                else:
+                    # Multi-label binary format
+                    active_hallmarks = np.where(labels == 1)[0].tolist()
             
             # Update hallmark sample counts
             for hallmark_id in active_hallmarks:

@@ -200,7 +200,18 @@ class LearnedMechanisticInterpreter:
         
         # Extract data from cached sample
         sample_text = sample_data.get('text', '')
-        true_labels = np.where(sample_data['labels'] == 1)[0].tolist()
+        
+        # Get labels and ensure they're in the right format
+        labels = sample_data.get('labels', [])
+        if isinstance(labels, list):
+            labels = np.array(labels)
+        elif isinstance(labels, int):
+            # Single label - convert to multi-label format
+            temp = np.zeros(11)
+            temp[labels] = 1
+            labels = temp
+        
+        true_labels = np.where(labels == 1)[0].tolist()
         
         # Load cached KG data
         entities = sample_data.get('entities', [])
@@ -219,7 +230,7 @@ class LearnedMechanisticInterpreter:
         batch = {
             'input_ids': encoding['input_ids'].to(self.device),
             'attention_mask': encoding['attention_mask'].to(self.device),
-            'labels': torch.tensor([sample_data['labels']]).to(self.device),
+            'labels': torch.tensor(labels).unsqueeze(0).float().to(self.device),  # Ensure float tensor
             'graph_data': None,  # Would need proper graph features
             'biological_context': None  # Would need proper context
         }
