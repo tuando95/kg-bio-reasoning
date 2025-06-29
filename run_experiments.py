@@ -134,31 +134,31 @@ class ExperimentRunner:
             #        'model.use_bio_attention': False
             #    }
             #),
-            self._create_config(
-                "ablation_attention_entity_only",
-                {
-                    'model.use_bio_attention': True,
-                    'model.bio_attention.use_pathways': False
-                }
-            )
+            #self._create_config(
+            #    "ablation_attention_entity_only",
+            #    {
+            #        'model.use_bio_attention': True,
+            #        'model.bio_attention.use_pathways': False
+            #    }
+            #)
         ])
         
         # A2: Knowledge Graph Integration Levels
         logger.info("Generating KG integration ablations...")
         ablation_configs.extend([
-            self._create_config(
-                "ablation_kg_none",
-                {
-                    'model.use_knowledge_graph': False
-                }
-            ),
-            self._create_config(
-                "ablation_kg_1hop",
-                {
-                    'model.use_knowledge_graph': True,
-                    'knowledge_graph.graph_construction.max_hops': 1
-                }
-            )
+            #self._create_config(
+            #    "ablation_kg_none",
+            #    {
+            #        'model.use_knowledge_graph': False
+            #    }
+            #),
+            #self._create_config(
+            #    "ablation_kg_1hop",
+            #    {
+            #        'model.use_knowledge_graph': True,
+            #        'knowledge_graph.graph_construction.max_hops': 1
+            #    }
+            #)
         ])
         
         # A3: Fusion Strategy Variants

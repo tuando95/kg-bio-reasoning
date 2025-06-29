@@ -224,3 +224,4 @@ poetry.lock
 Pipfile.lock
 .idea/
 CLAUDE.md
+patent.md
