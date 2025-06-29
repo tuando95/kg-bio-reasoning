@@ -62,18 +62,23 @@ class BiologicalPathwayGuidedAttention(nn.Module):
         self.bio_k_proj = nn.Linear(self.hidden_size, self.hidden_size)
         self.bio_v_proj = nn.Linear(self.hidden_size, self.hidden_size)
         
-        # Pathway relevance matrix
-        self.pathway_relevance_matrix = nn.Linear(
-            self.pathway_relevance_dim * 2,
-            1
-        )
-        
-        # Entity-pathway association encoder
-        self.entity_pathway_encoder = nn.Sequential(
-            nn.Linear(self.hidden_size * 2, self.pathway_relevance_dim),
-            nn.ReLU(),
-            nn.Dropout(config['model']['dropout_rate'])
-        )
+        # Pathway-specific components (only created if use_pathways is True)
+        if self.use_pathways:
+            # Pathway relevance matrix
+            self.pathway_relevance_matrix = nn.Linear(
+                self.pathway_relevance_dim * 2,
+                1
+            )
+            
+            # Entity-pathway association encoder
+            self.entity_pathway_encoder = nn.Sequential(
+                nn.Linear(self.hidden_size * 2, self.pathway_relevance_dim),
+                nn.ReLU(),
+                nn.Dropout(config['model']['dropout_rate'])
+            )
+        else:
+            self.pathway_relevance_matrix = None
+            self.entity_pathway_encoder = None
         
         # Output projection
         self.out_proj = nn.Linear(self.hidden_size, self.hidden_size)
@@ -293,6 +298,11 @@ class BiologicalPathwayGuidedAttention(nn.Module):
         Returns:
             Attention bias matrix [batch_size, seq_len, seq_len]
         """
+        if not self.use_pathways:
+            # Return zero bias if pathways are disabled
+            batch_size, seq_len, _ = hidden_states.shape
+            return torch.zeros(batch_size, seq_len, seq_len, device=hidden_states.device)
+        
         batch_size, seq_len, _ = hidden_states.shape
         
         # Initialize bias matrix
@@ -329,6 +339,12 @@ class BiologicalPathwayGuidedAttention(nn.Module):
         Returns:
             Association scores [batch_size, seq_len, num_pathways]
         """
+        if not self.use_pathways or self.entity_pathway_encoder is None:
+            # Return uniform associations if pathways are disabled
+            batch_size, seq_len, _ = hidden_states.shape
+            num_pathways = pathway_embeddings.shape[1]
+            return torch.ones(batch_size, seq_len, num_pathways, device=hidden_states.device) / num_pathways
+        
         batch_size, seq_len, _ = hidden_states.shape
         num_pathways = pathway_embeddings.shape[1]
         
