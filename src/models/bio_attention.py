@@ -49,6 +49,9 @@ class BiologicalPathwayGuidedAttention(nn.Module):
         else:
             self.fusion_weight = config['model']['bio_attention']['fusion_weight']
         
+        # Pathway usage configuration
+        self.use_pathways = config['model']['bio_attention'].get('use_pathways', True)
+        
         # Standard attention components
         self.q_proj = nn.Linear(self.hidden_size, self.hidden_size)
         self.k_proj = nn.Linear(self.hidden_size, self.hidden_size)
@@ -81,7 +84,7 @@ class BiologicalPathwayGuidedAttention(nn.Module):
         # Layer norm
         self.layer_norm = nn.LayerNorm(self.hidden_size)
         
-        logger.info(f"Initialized Biological Pathway-Guided Attention with {self.num_heads} heads")
+        logger.info(f"Initialized Biological Pathway-Guided Attention with {self.num_heads} heads, use_pathways={self.use_pathways}")
     
     def forward(self,
                 hidden_states: torch.Tensor,
@@ -224,8 +227,8 @@ class BiologicalPathwayGuidedAttention(nn.Module):
         # Compute biological attention scores
         scores_bio = torch.matmul(Q_bio, K_bio.transpose(-2, -1)) / math.sqrt(self.head_dim)
         
-        # Add pathway relevance bias
-        if pathway_embeddings is not None and pathway_relevance_scores is not None:
+        # Add pathway relevance bias only if use_pathways is True
+        if self.use_pathways and pathway_embeddings is not None and pathway_relevance_scores is not None:
             pathway_bias = self._compute_pathway_relevance_bias(
                 hidden_states, pathway_embeddings, pathway_relevance_scores, entity_to_token_map
             )

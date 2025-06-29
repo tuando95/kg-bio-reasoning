@@ -128,12 +128,12 @@ class ExperimentRunner:
         # A1: Attention Mechanism Variants
         logger.info("Generating attention mechanism ablations...")
         ablation_configs.extend([
-            self._create_config(
-                "ablation_attention_none",
-                {
-                    'model.use_bio_attention': False
-                }
-            ),
+            #self._create_config(
+            #    "ablation_attention_none",
+            #    {
+            #        'model.use_bio_attention': False
+            #    }
+            #),
             self._create_config(
                 "ablation_attention_entity_only",
                 {
@@ -163,7 +163,7 @@ class ExperimentRunner:
         
         # A3: Fusion Strategy Variants
         logger.info("Generating fusion strategy ablations...")
-        for strategy in ['early', 'late', 'cross_modal']:
+        for strategy in ['early', 'cross_modal']:
             ablation_configs.append(
                 self._create_config(
                     f"ablation_fusion_{strategy}",

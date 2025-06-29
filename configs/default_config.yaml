@@ -20,6 +20,7 @@ model:
     fusion_strategy: "learned"  # Options: learned, fixed, adaptive
     fusion_weight: 0.5  # Initial lambda value (for attention fusion)
     pathway_relevance_dim: 256
+    use_pathways: true  # Whether to use pathway relevance in biological attention
     
   # Graph Neural Network Configuration
   gnn:
