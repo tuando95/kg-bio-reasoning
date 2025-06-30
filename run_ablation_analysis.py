@@ -165,7 +165,16 @@ class AblationAnalyzer:
             }
         
         model = BioKGBioBERT(model_config)
-        model.load_state_dict(checkpoint['model_state_dict'])
+        
+        # Load state dict with strict=False to handle missing/unexpected keys
+        incompatible_keys = model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+        
+        # Log any missing or unexpected keys
+        if incompatible_keys.missing_keys:
+            print(f"Warning: Missing keys in checkpoint: {incompatible_keys.missing_keys}")
+        if incompatible_keys.unexpected_keys:
+            print(f"Warning: Unexpected keys in checkpoint (ignored): {incompatible_keys.unexpected_keys}")
+        
         model.eval()
         model.to(self.device)
         
